@@ -29,7 +29,16 @@ func main() {
 	temporalClient := dependencies.GetTemporalClient()
 	logger := log.Default()
 
+	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Recovered from panic: %v", r)
+			dependencies.Cleanup()
+			panic(r)
+		}
+	}()
 
 	jobEndpoint := job.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 

@@ -30,7 +30,8 @@ type ApplyForJobRequest struct {
 }
 
 type JobApplicationWorkflowInput struct {
-	Url string `json:"url"`
+	Url              string `json:"url"`
+	IdJobApplication uint   `json:"id_job_application"`
 }
 
 func (e *Endpoint) ApplyForJob(c *gin.Context) {
@@ -40,7 +41,8 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		return
 	}
 
-	if err := e.db.Create(&model.JobApplication{Url: request.Url, Status: model.JobApplicationStatusPending}).Error; err != nil {
+	jobApplication := model.JobApplication{Url: request.Url, Status: model.JobApplicationStatusPending}
+	if err := e.db.Create(&jobApplication).Error; err != nil {
 		e.logger.Printf("Failed to create job application: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job application"})
 		return
@@ -53,7 +55,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		WorkflowTaskTimeout:      1 * time.Minute,
 	}
 
-	_, err := e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", JobApplicationWorkflowInput{Url: request.Url})
+	_, err := e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", JobApplicationWorkflowInput{Url: request.Url, IdJobApplication: jobApplication.IdJobApplication})
 	if err != nil {
 		e.logger.Printf("Failed to start job application process: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start job application process"})
