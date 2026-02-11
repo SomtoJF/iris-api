@@ -15,7 +15,14 @@ func ConnectToSQLite() error {
 	if err != nil {
 		return err
 	}
-	dbPath := homeDir + "/iris/db/gorm.db"
+
+	// Create the directory path if it doesn't exist
+	dbDir := homeDir + "/iris/db"
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		return err
+	}
+
+	dbPath := dbDir + "/gorm.db"
 
 	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
