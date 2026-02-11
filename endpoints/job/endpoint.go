@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/SomtoJF/iris-api/model"
 	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/gin-gonic/gin"
 	"go.temporal.io/sdk/client"
@@ -25,7 +26,7 @@ func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *log.Logger, 
 }
 
 type ApplyForJobRequest struct {
-	Url string `json:"url"`
+	Url string `json:"url" binding:"required"`
 }
 
 type JobApplicationWorkflowInput struct {
@@ -36,6 +37,12 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	var request ApplyForJobRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := e.db.Create(&model.JobApplication{Url: request.Url, Status: model.JobApplicationStatusPending}).Error; err != nil {
+		e.logger.Printf("Failed to create job application: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job application"})
 		return
 	}
 
