@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"os"
 
 	"github.com/SomtoJF/iris-api/initializers/sqldb"
 	"github.com/gin-gonic/gin"
@@ -23,5 +24,13 @@ func main() {
 		})
 	})
 
-	r.Run()
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "4000"
+	}
+
+	log.Printf("Starting server on port %s", port)
+	if err := r.Run(":" + port); err != nil {
+		log.Panicf("error: %s", err)
+	}
 }
