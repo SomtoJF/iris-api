@@ -4,7 +4,10 @@ import (
 	"log"
 	"os"
 
+	"github.com/SomtoJF/iris-api/common"
+	"github.com/SomtoJF/iris-api/endpoints/job"
 	"github.com/SomtoJF/iris-api/initializers/sqldb"
+	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/gin-gonic/gin"
 )
 
@@ -16,13 +19,21 @@ func init() {
 }
 
 func main() {
+	dependencies, err := common.MakeDependencies()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dependencies.Cleanup()
+
+	db := dependencies.GetDB()
+	temporalClient := dependencies.GetTemporalClient()
+	logger := log.Default()
+
 	r := gin.Default()
 
-	r.GET("/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "pong",
-		})
-	})
+	jobEndpoint := job.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
+
+	r.POST("/jobs/apply", jobEndpoint.ApplyForJob)
 
 	port := os.Getenv("PORT")
 	if port == "" {
