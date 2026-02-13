@@ -51,7 +51,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	workflowOptions := client.StartWorkflowOptions{
 		ID:                       fmt.Sprintf("job-application-%s-%d", request.Url, time.Now().Unix()),
 		TaskQueue:                string(e.taskQueueName),
-		WorkflowExecutionTimeout: 5 * time.Minute,
+		WorkflowExecutionTimeout: 40 * time.Minute,
 		WorkflowTaskTimeout:      1 * time.Minute,
 	}
 
