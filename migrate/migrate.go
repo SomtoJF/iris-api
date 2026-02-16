@@ -22,5 +22,10 @@ func main() {
 		log.Fatal(err)
 	}
 
+	err = db.AutoMigrate(&model.Resume{})
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	log.Println("Migration completed")
 }
