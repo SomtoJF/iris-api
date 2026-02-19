@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -43,6 +44,10 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 
 	jobApplication := model.JobApplication{Url: request.Url, Status: model.JobApplicationStatusPending}
 	if err := e.db.Create(&jobApplication).Error; err != nil {
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Job application already exists"})
+			return
+		}
 		e.logger.Printf("Failed to create job application: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job application"})
 		return
