@@ -159,7 +159,7 @@ func (e *Endpoint) TriggerTestEvent(c *gin.Context) {
 	}
 
 	// Send test event
-	err := e.redisPubSub.PublishToUser(c.Request.Context(), userIDStr, redispubsub.ActionNotification, testData)
+	err := e.redisPubSub.PublishToUser(c.Request.Context(), userIDStr, redispubsub.ActionUserActionRequired, testData)
 	if err != nil {
 		log.Printf("Failed to publish test event: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send test event"})

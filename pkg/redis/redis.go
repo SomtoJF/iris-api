@@ -14,29 +14,9 @@ import (
 type ActionType string
 
 const (
-	ActionTriggerUpdate                ActionType = "TRIGGER_UPDATE"
-	ActionAccountUpdate                ActionType = "ACCOUNT_UPDATE"
-	ActionSequenceUpdate               ActionType = "SEQUENCE_UPDATE"
-	ActionSequenceGenerationCompletion ActionType = "SEQUENCE_GENERATION_COMPLETION"
-	ActionKeyPersonUpdate              ActionType = "KEY_PERSON_UPDATE"
-	ActionCampaignUpdate               ActionType = "CAMPAIGN_UPDATE"
-	ActionWorkflowUpdate               ActionType = "WORKFLOW_UPDATE"
-	ActionNotification                 ActionType = "NOTIFICATION"
-	ActionSystemMessage                ActionType = "SYSTEM_MESSAGE"
-	ActionKeyPeopleActivityCreated     ActionType = "KEY_PEOPLE_ACTIVITY_CREATED"
-	ActionEmailSent                    ActionType = "EMAIL_MESSAGE_SENT"
-	ActionEmailFailed                  ActionType = "EMAIL_MESSAGE_FAILED"
-	ActionSequenceEmailSent            ActionType = "SEQUENCE_EMAIL_SENT"
-	ActionSequenceEmailFailed          ActionType = "SEQUENCE_EMAIL_FAILED"
-	ActionInboxChanged                 ActionType = "INBOX_CHANGED"
-	ActionBotWorkflowStarted           ActionType = "BOT_WORKFLOW_STARTED"
-	ActionBotTaskProgress              ActionType = "BOT_TASK_PROGRESS"
-	ActionBotTaskCompleted             ActionType = "BOT_TASK_COMPLETED"
-	ActionBotTaskFailed                ActionType = "BOT_TASK_FAILED"
-	ActionBotWorkflowCompleted         ActionType = "BOT_WORKFLOW_COMPLETED"
-	ActionAgentToolReady               ActionType = "AGENT_TOOL_READY"
-	ActionAgentCompleted               ActionType = "AGENT_COMPLETED"
-	ActionAgentFailed                  ActionType = "AGENT_FAILED"
+	ActionApplicationSuccessful ActionType = "APPLICATION_SUCCESSFUL"
+	ActionApplicationFailed     ActionType = "APPLICATION_FAILED"
+	ActionUserActionRequired    ActionType = "USER_ACTION_REQUIRED"
 )
 
 // Event represents a real-time event to be sent to clients
