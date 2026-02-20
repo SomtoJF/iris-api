@@ -1,5 +1,5 @@
 run:
-	CompileDaemon -command="go run main.go" -build="go build -o iris-api main.go" -exclude-dir="vendor"
+	CompileDaemon -command="./iris-api" -exclude-dir="vendor"
 
 build:
 	go build -o iris-api main.go
