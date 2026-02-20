@@ -71,8 +71,8 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 }
 
 type FetchAllJobApplicationsRequest struct {
-	Page  int `json:"page" binding:"required"`
-	Limit int `json:"limit" binding:"required"`
+	Page  int `form:"page" binding:"required"`
+	Limit int `form:"limit" binding:"required"`
 }
 
 type JobApplication struct {
@@ -92,7 +92,7 @@ type FetchAllJobApplicationsResponse struct {
 
 func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	var request FetchAllJobApplicationsRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
+	if err := c.ShouldBindQuery(&request); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -109,8 +109,7 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch total job applications"})
 		return
 	}
-	applications := make([]JobApplication, len(jobApplications))
-
+	applications := make([]JobApplication, 0, len(jobApplications))
 	for _, jobApplication := range jobApplications {
 		applications = append(applications, JobApplication{
 			Id:        jobApplication.IdExternal.String(),
