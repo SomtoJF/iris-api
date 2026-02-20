@@ -56,6 +56,7 @@ func main() {
 	r.POST("/jobs/apply", jobEndpoint.ApplyForJob)
 	r.GET("/jobs", jobEndpoint.FetchAllJobApplications)
 	r.GET("/realtime/events", realtimeEventsEndpoint.StreamEvents)
+	r.PUT("/resumes/:id/activate", resumeEndpoint.SetResumeAsActive)
 	r.GET("/resumes", resumeEndpoint.FetchResumes)
 
 	port := os.Getenv("PORT")
