@@ -97,7 +97,7 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 		return
 	}
 	var jobApplications []model.JobApplication
-	if err := e.db.Limit(request.Limit).Offset((request.Page - 1) * request.Limit).Find(&jobApplications).Error; err != nil {
+	if err := e.db.Order("created_at DESC").Limit(request.Limit).Offset((request.Page - 1) * request.Limit).Find(&jobApplications).Error; err != nil {
 		e.logger.Printf("Failed to fetch job applications: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch job applications"})
 		return
