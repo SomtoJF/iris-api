@@ -50,6 +50,7 @@ func main() {
 	jobEndpoint := job.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 
 	r.POST("/jobs/apply", jobEndpoint.ApplyForJob)
+	r.GET("/jobs", jobEndpoint.FetchAllJobApplications)
 
 	port := os.Getenv("PORT")
 	if port == "" {

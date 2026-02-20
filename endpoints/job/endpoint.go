@@ -69,3 +69,61 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Job application initiated"})
 }
+
+type FetchAllJobApplicationsRequest struct {
+	Page  int `json:"page" binding:"required"`
+	Limit int `json:"limit" binding:"required"`
+}
+
+type JobApplication struct {
+	Id        string                     `json:"id"`
+	Url       string                     `json:"url"`
+	Status    model.JobApplicationStatus `json:"status"`
+	CreatedAt time.Time                  `json:"createdAt"`
+	UpdatedAt time.Time                  `json:"updatedAt"`
+}
+
+type FetchAllJobApplicationsResponse struct {
+	Data  []JobApplication `json:"data"`
+	Total int              `json:"total"`
+	Page  int              `json:"page"`
+	Limit int              `json:"limit"`
+}
+
+func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
+	var request FetchAllJobApplicationsRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	var jobApplications []model.JobApplication
+	if err := e.db.Limit(request.Limit).Offset((request.Page - 1) * request.Limit).Find(&jobApplications).Error; err != nil {
+		e.logger.Printf("Failed to fetch job applications: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch job applications"})
+		return
+	}
+
+	var total int64
+	if err := e.db.Model(&model.JobApplication{}).Count(&total).Error; err != nil {
+		e.logger.Printf("Failed to fetch total job applications: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch total job applications"})
+		return
+	}
+	applications := make([]JobApplication, len(jobApplications))
+
+	for _, jobApplication := range jobApplications {
+		applications = append(applications, JobApplication{
+			Id:        jobApplication.IdExternal.String(),
+			Url:       jobApplication.Url,
+			Status:    jobApplication.Status,
+			CreatedAt: jobApplication.CreatedAt,
+			UpdatedAt: jobApplication.UpdatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"data": FetchAllJobApplicationsResponse{
+		Data:  applications,
+		Total: int(total),
+		Page:  request.Page,
+		Limit: request.Limit,
+	}})
+}
