@@ -42,7 +42,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		return
 	}
 
-	jobApplication := model.JobApplication{Url: request.Url, Status: model.JobApplicationStatusPending}
+	jobApplication := model.JobApplication{Url: request.Url, JobTitle: "Pending-Job-Title", CompanyName: "Pending-Company-Name", JobDescription: "Pending-Job-Description", Status: model.JobApplicationStatusPending}
 	if err := e.db.Create(&jobApplication).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Job application already exists"})
