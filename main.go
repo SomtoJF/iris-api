@@ -7,6 +7,7 @@ import (
 	"github.com/SomtoJF/iris-api/common"
 	"github.com/SomtoJF/iris-api/endpoints/job"
 	realtimeeventsse "github.com/SomtoJF/iris-api/endpoints/realtimeeventssse"
+	"github.com/SomtoJF/iris-api/endpoints/resume"
 	"github.com/SomtoJF/iris-api/initializers/sqldb"
 	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/gin-contrib/cors"
@@ -50,10 +51,12 @@ func main() {
 
 	jobEndpoint := job.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 	realtimeEventsEndpoint := realtimeeventsse.NewEndpoint(dependencies.GetRedisPubSub(), logger)
+	resumeEndpoint := resume.NewEndpoint(db)
 
 	r.POST("/jobs/apply", jobEndpoint.ApplyForJob)
 	r.GET("/jobs", jobEndpoint.FetchAllJobApplications)
 	r.GET("/realtime/events", realtimeEventsEndpoint.StreamEvents)
+	r.GET("/resumes", resumeEndpoint.FetchResumes)
 
 	port := os.Getenv("PORT")
 	if port == "" {
