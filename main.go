@@ -5,10 +5,13 @@ import (
 	"os"
 
 	"github.com/SomtoJF/iris-api/common"
+	"github.com/SomtoJF/iris-api/endpoints/auth"
+	"github.com/SomtoJF/iris-api/endpoints/health"
 	"github.com/SomtoJF/iris-api/endpoints/job"
 	realtimeeventsse "github.com/SomtoJF/iris-api/endpoints/realtimeeventssse"
 	"github.com/SomtoJF/iris-api/endpoints/resume"
 	"github.com/SomtoJF/iris-api/initializers/sqldb"
+	"github.com/SomtoJF/iris-api/middleware/verifyauth"
 	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -36,9 +39,10 @@ func main() {
 	r := gin.Default()
 
 	r.Use(cors.New(cors.Config{
-		AllowOrigins: []string{"http://localhost:5173"},
-		AllowMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders: []string{"Content-Type", "Authorization"},
+		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:     []string{"Content-Type", "Authorization"},
+		AllowCredentials: true,
 	}))
 
 	defer func() {
@@ -49,15 +53,37 @@ func main() {
 		}
 	}()
 
+	authEndpoint := auth.NewEndpoint(db, os.Getenv("CLIENT_DOMAIN"))
+	healthEndpoint := health.NewEndpoint()
 	jobEndpoint := job.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 	realtimeEventsEndpoint := realtimeeventsse.NewEndpoint(dependencies.GetRedisPubSub(), logger)
 	resumeEndpoint := resume.NewEndpoint(db)
 
-	r.POST("/jobs/apply", jobEndpoint.ApplyForJob)
-	r.GET("/jobs", jobEndpoint.FetchAllJobApplications)
-	r.GET("/realtime/events", realtimeEventsEndpoint.StreamEvents)
-	r.PUT("/resumes/:id/activate", resumeEndpoint.SetResumeAsActive)
-	r.GET("/resumes", resumeEndpoint.FetchResumes)
+	authMiddleware := verifyauth.NewMiddleware(db)
+
+	public := r.Group("/")
+	{
+		public.POST("/login", authEndpoint.Login)
+		public.POST("/signup", authEndpoint.Signup)
+
+		public.GET("/health", healthEndpoint.HealthCheck)
+	}
+
+	protected := r.Group("/")
+	protected.Use(authMiddleware.VerifyAuth())
+	{
+		protected.POST("/logout", authEndpoint.Logout)
+		protected.POST("/reset-password", authEndpoint.ResetPassword)
+		protected.GET("/me", authEndpoint.GetCurrentUser)
+
+		protected.POST("/jobs/apply", jobEndpoint.ApplyForJob)
+		protected.GET("/jobs", jobEndpoint.FetchAllJobApplications)
+
+		protected.GET("/realtime/events", realtimeEventsEndpoint.StreamEvents)
+
+		protected.GET("/resumes", resumeEndpoint.FetchResumes)
+		protected.PUT("/resumes/:id/activate", resumeEndpoint.SetResumeAsActive)
+	}
 
 	port := os.Getenv("PORT")
 	if port == "" {

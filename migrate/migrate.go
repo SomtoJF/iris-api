@@ -17,15 +17,16 @@ func init() {
 func main() {
 	db := sqldb.DB
 
-	err := db.AutoMigrate(&model.JobApplication{})
-	if err != nil {
+	if err := db.AutoMigrate(&model.User{}); err != nil {
 		log.Fatal(err)
 	}
 
-	err = db.AutoMigrate(&model.Resume{})
-	if err != nil {
+	if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
 		log.Fatal(err)
 	}
 
+	if err := db.AutoMigrate(&model.Resume{}); err != nil {
+		log.Fatal(err)
+	}
 	log.Println("Migration completed")
 }

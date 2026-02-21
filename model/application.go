@@ -18,6 +18,8 @@ const (
 type JobApplication struct {
 	IdJobApplication uint                 `gorm:"primaryKey;autoIncrement;column:id_job_application" json:"_"`
 	IdExternal       uuid.UUID            `gorm:"type:text;not null;unique" json:"id"`
+	UserId           uint                 `gorm:"column:id_user;not null"`
+	User             User                 `gorm:"foreignKey:UserId;references:IdUser"`
 	Status           JobApplicationStatus `gorm:"type:varchar(50);not null"`
 	JobTitle         string               `gorm:"type:varchar(255);not null"`
 	CompanyName      string               `gorm:"type:varchar(255);not null"`
