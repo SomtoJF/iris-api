@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/SomtoJF/iris-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
-	"github.com/somtojf/trio-server/models"
 	"gorm.io/gorm"
 )
 
@@ -55,8 +55,8 @@ func (m *Middleware) VerifyAuth() gin.HandlerFunc {
 			return
 		}
 
-		var user models.User
-		result := m.DB.Where("external_id = ?", claims["id"]).First(&user)
+		var user model.User
+		result := m.DB.Where("id_external = ?", claims["id"]).First(&user)
 		if result.Error != nil {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
 			c.Abort()
