@@ -37,6 +37,12 @@ func NewEndpoint(redisPubSub *redispubsub.RedisPubSub, logger *log.Logger) *Endp
 // @Failure 500 {object} map[string]interface{} "Internal server error"
 // @Router /realtime/events [get]
 func (e *Endpoint) StreamEvents(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
 	// Set SSE headers
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -47,11 +53,7 @@ func (e *Endpoint) StreamEvents(c *gin.Context) {
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 
-	// TODO: When auth is ready, get user ID from context instead of hardcoding
-	// userID, exists := c.Get("IdUser")
-	// userIDUint := userID.(uint)
-	// userIDStr := fmt.Sprintf("%d", userIDUint)
-	userIDStr := "anonymous"
+	userIDStr := fmt.Sprintf("%d", userId)
 
 	// Subscribe to user's Redis channel
 	eventChan, err := e.redisPubSub.SubscribeToUser(ctx, userIDStr)
