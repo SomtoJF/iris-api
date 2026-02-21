@@ -35,7 +35,7 @@ func (e *Endpoint) FetchResumes(c *gin.Context) {
 	}
 
 	var resumes []model.Resume
-	if err := e.db.Where("deleted_at IS NULL AND user_id = ?", userId).Order("created_at DESC").Find(&resumes).Error; err != nil {
+	if err := e.db.Where("deleted_at IS NULL AND id_user = ?", userId).Order("created_at DESC").Find(&resumes).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch resumes"})
 		return
 	}
@@ -73,7 +73,7 @@ func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 	}()
 
 	// Deactivate all resumes for the user
-	if err := tx.Model(&model.Resume{}).Where("deleted_at IS NULL AND user_id = ?", userId).Update("is_active", false).Error; err != nil {
+	if err := tx.Model(&model.Resume{}).Where("deleted_at IS NULL AND id_user = ?", userId).Update("is_active", false).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to deactivate resumes"})
 		return
@@ -81,7 +81,7 @@ func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 
 	// Find resume by IdExternal
 	var resume model.Resume
-	if err := tx.Where("id_external = ? AND deleted_at IS NULL AND user_id = ?", id, userId).First(&resume).Error; err != nil {
+	if err := tx.Where("id_external = ? AND deleted_at IS NULL AND id_user = ?", id, userId).First(&resume).Error; err != nil {
 		tx.Rollback()
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Resume not found"})
