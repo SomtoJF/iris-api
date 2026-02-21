@@ -28,8 +28,14 @@ type ResumeDTO struct {
 }
 
 func (e *Endpoint) FetchResumes(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
 	var resumes []model.Resume
-	if err := e.db.Where("deleted_at IS NULL").Order("created_at DESC").Find(&resumes).Error; err != nil {
+	if err := e.db.Where("deleted_at IS NULL AND user_id = ?", userId).Order("created_at DESC").Find(&resumes).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch resumes"})
 		return
 	}
@@ -52,6 +58,11 @@ func (e *Endpoint) FetchResumes(c *gin.Context) {
 
 func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 	id := c.Param("id")
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
 
 	// Start transaction
 	tx := e.db.Begin()
@@ -61,8 +72,8 @@ func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 		}
 	}()
 
-	// Deactivate all resumes
-	if err := tx.Model(&model.Resume{}).Where("deleted_at IS NULL").Update("is_active", false).Error; err != nil {
+	// Deactivate all resumes for the user
+	if err := tx.Model(&model.Resume{}).Where("deleted_at IS NULL AND user_id = ?", userId).Update("is_active", false).Error; err != nil {
 		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to deactivate resumes"})
 		return
@@ -70,7 +81,7 @@ func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 
 	// Find resume by IdExternal
 	var resume model.Resume
-	if err := tx.Where("id_external = ? AND deleted_at IS NULL", id).First(&resume).Error; err != nil {
+	if err := tx.Where("id_external = ? AND deleted_at IS NULL AND user_id = ?", id, userId).First(&resume).Error; err != nil {
 		tx.Rollback()
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Resume not found"})
