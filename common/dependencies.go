@@ -1,11 +1,13 @@
 package common
 
 import (
+	"os"
+
 	redisInit "github.com/SomtoJF/iris-api/initializers/redis"
 	"github.com/SomtoJF/iris-api/initializers/s3"
 	"github.com/SomtoJF/iris-api/initializers/sqldb"
 	redispubsub "github.com/SomtoJF/iris-api/pkg/redis"
-	s3Pkg "github.com/aws/aws-sdk-go-v2/service/s3"
+	s3pkg "github.com/SomtoJF/iris-api/pkg/s3"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
 )
@@ -14,7 +16,7 @@ type Dependencies interface {
 	GetDB() *gorm.DB
 	GetTemporalClient() client.Client
 	GetRedisPubSub() *redispubsub.RedisPubSub
-	GetS3Client() *s3Pkg.Client
+	GetS3Manager() *s3pkg.S3Manager
 	Cleanup()
 }
 
@@ -22,7 +24,7 @@ type dependencies struct {
 	db             *gorm.DB
 	temporalClient client.Client
 	redisPubSub    *redispubsub.RedisPubSub
-	s3Client       *s3Pkg.Client
+	s3Manager      *s3pkg.S3Manager
 }
 
 func (d *dependencies) GetDB() *gorm.DB {
@@ -37,8 +39,8 @@ func (d *dependencies) GetRedisPubSub() *redispubsub.RedisPubSub {
 	return d.redisPubSub
 }
 
-func (d *dependencies) GetS3Client() *s3Pkg.Client {
-	return d.s3Client
+func (d *dependencies) GetS3Manager() *s3pkg.S3Manager {
+	return d.s3Manager
 }
 
 func (d *dependencies) Cleanup() {
@@ -77,10 +79,13 @@ func MakeDependencies() (Dependencies, error) {
 		return nil, err
 	}
 
+	bucket := os.Getenv("AWS_BUCKET")
+	s3Manager := s3pkg.NewS3Manager(s3Client, bucket)
+
 	return &dependencies{
 		db:             db,
 		temporalClient: temporalClient,
 		redisPubSub:    redisPubSub,
-		s3Client:       s3Client,
+		s3Manager:      s3Manager,
 	}, nil
 }

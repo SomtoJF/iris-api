@@ -33,8 +33,9 @@ func main() {
 
 	db := dependencies.GetDB()
 	temporalClient := dependencies.GetTemporalClient()
-	s3Client := dependencies.GetS3Client()
+	s3Manager := dependencies.GetS3Manager()
 	logger := log.Default()
+	redisPubSub := dependencies.GetRedisPubSub()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
@@ -57,8 +58,8 @@ func main() {
 	authEndpoint := auth.NewEndpoint(db, os.Getenv("CLIENT_DOMAIN"))
 	healthEndpoint := health.NewEndpoint()
 	jobEndpoint := job.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
-	realtimeEventsEndpoint := realtimeeventsse.NewEndpoint(dependencies.GetRedisPubSub(), logger)
-	resumeEndpoint := resume.NewEndpoint(db, s3Client)
+	realtimeEventsEndpoint := realtimeeventsse.NewEndpoint(redisPubSub, logger)
+	resumeEndpoint := resume.NewEndpoint(db, s3Manager)
 
 	authMiddleware := verifyauth.NewMiddleware(db)
 
@@ -83,7 +84,10 @@ func main() {
 		protected.GET("/realtime/events", realtimeEventsEndpoint.StreamEvents)
 
 		protected.GET("/resumes", resumeEndpoint.FetchResumes)
+		protected.POST("/resumes", resumeEndpoint.UploadResume)
 		protected.PUT("/resumes/:id/activate", resumeEndpoint.SetResumeAsActive)
+		protected.DELETE("/resumes/:id", resumeEndpoint.DeleteResume)
+		protected.GET("/resumes/:id/download", resumeEndpoint.GetResumeDownloadUrl)
 	}
 
 	port := os.Getenv("PORT")
