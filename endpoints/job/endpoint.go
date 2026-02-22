@@ -39,12 +39,14 @@ type JobApplicationWorkflowInput struct {
 func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Printf("Unauthorized user: %d", userId)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var request ApplyForJobRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
+		e.logger.Printf("Failed to bind request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -59,11 +61,12 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	}
 	if err := e.db.Create(&jobApplication).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			e.logger.Printf("Job application already exists: %v", err)
 			c.JSON(http.StatusConflict, gin.H{"error": "Job application already exists"})
 			return
 		}
 		e.logger.Printf("Failed to create job application: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job application"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job application: " + err.Error()})
 		return
 	}
 
@@ -118,9 +121,11 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 
 	var request FetchAllJobApplicationsRequest
 	if err := c.ShouldBindQuery(&request); err != nil {
+		e.logger.Printf("Failed to bind request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
 	var jobApplications []model.JobApplication
 	if err := e.db.Order("created_at DESC").Where("user_id = ?", userId).Limit(request.Limit).Offset((request.Page - 1) * request.Limit).Find(&jobApplications).Error; err != nil {
 		e.logger.Printf("Failed to fetch job applications: %v", err)

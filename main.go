@@ -59,7 +59,7 @@ func main() {
 	healthEndpoint := health.NewEndpoint()
 	jobEndpoint := job.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 	realtimeEventsEndpoint := realtimeeventsse.NewEndpoint(redisPubSub, logger)
-	resumeEndpoint := resume.NewEndpoint(db, s3Manager)
+	resumeEndpoint := resume.NewEndpoint(db, s3Manager, logger)
 
 	authMiddleware := verifyauth.NewMiddleware(db)
 
