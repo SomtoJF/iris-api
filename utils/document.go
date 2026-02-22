@@ -2,11 +2,13 @@ package utils
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
 
+	md "github.com/JohannesKaufmann/html-to-markdown"
 	"github.com/ledongthuc/pdf"
 	"github.com/nguyenthenguyen/docx"
 )
@@ -28,7 +30,9 @@ func ExtractTextFromPDF(file io.Reader) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(content)), nil
+	text := strings.Join(strings.FieldsFunc(strings.TrimSpace(string(content)), func(r rune) bool { return r == '\n' || r == '\r' }), " ")
+
+	return text, nil
 }
 
 func ExtractTextFromDOCX(file io.Reader, fileSize int64) (string, error) {
@@ -43,7 +47,19 @@ func ExtractTextFromDOCX(file io.Reader, fileSize int64) (string, error) {
 	defer doc.Close()
 
 	text := doc.Editable().GetContent()
-	return strings.TrimSpace(text), nil
+
+	// Convert to markdown
+	converter := md.NewConverter("", true, nil)
+	markdown, err := converter.ConvertString(text)
+	if err != nil {
+		return "", fmt.Errorf("failed to convert html to markdown: %w", err)
+	}
+
+	// Clean up markdown
+	markdown = strings.TrimSpace(markdown)
+	fmt.Println(markdown)
+	return "", errors.New("test")
+	return markdown, nil
 }
 
 func ExtractTextFromDocument(file io.Reader, filename string, fileSize int64) (string, error) {
