@@ -10,7 +10,7 @@ import (
 	"github.com/SomtoJF/iris-api/endpoints/job"
 	realtimeeventsse "github.com/SomtoJF/iris-api/endpoints/realtimeeventssse"
 	"github.com/SomtoJF/iris-api/endpoints/resume"
-	"github.com/SomtoJF/iris-api/initializers/sqldb"
+	"github.com/SomtoJF/iris-api/initializers/env"
 	"github.com/SomtoJF/iris-api/middleware/verifyauth"
 	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/gin-contrib/cors"
@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	err := sqldb.ConnectToSQLite()
+	err := env.LoadEnvVariables()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -33,6 +33,7 @@ func main() {
 
 	db := dependencies.GetDB()
 	temporalClient := dependencies.GetTemporalClient()
+	s3Client := dependencies.GetS3Client()
 	logger := log.Default()
 
 	gin.SetMode(gin.ReleaseMode)
@@ -57,7 +58,7 @@ func main() {
 	healthEndpoint := health.NewEndpoint()
 	jobEndpoint := job.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 	realtimeEventsEndpoint := realtimeeventsse.NewEndpoint(dependencies.GetRedisPubSub(), logger)
-	resumeEndpoint := resume.NewEndpoint(db)
+	resumeEndpoint := resume.NewEndpoint(db, s3Client)
 
 	authMiddleware := verifyauth.NewMiddleware(db)
 

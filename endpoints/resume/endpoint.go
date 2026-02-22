@@ -5,16 +5,18 @@ import (
 	"time"
 
 	"github.com/SomtoJF/iris-api/model"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
 
 type Endpoint struct {
-	db *gorm.DB
+	db       *gorm.DB
+	s3Client *s3.Client
 }
 
-func NewEndpoint(db *gorm.DB) *Endpoint {
-	return &Endpoint{db: db}
+func NewEndpoint(db *gorm.DB, s3Client *s3.Client) *Endpoint {
+	return &Endpoint{db: db, s3Client: s3Client}
 }
 
 type ResumeDTO struct {
