@@ -2,7 +2,6 @@ package utils
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -57,8 +56,7 @@ func ExtractTextFromDOCX(file io.Reader, fileSize int64) (string, error) {
 
 	// Clean up markdown
 	markdown = strings.TrimSpace(markdown)
-	fmt.Println(markdown)
-	return "", errors.New("test")
+
 	return markdown, nil
 }
 
