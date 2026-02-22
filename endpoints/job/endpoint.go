@@ -127,14 +127,14 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	}
 
 	var jobApplications []model.JobApplication
-	if err := e.db.Order("created_at DESC").Where("user_id = ?", userId).Limit(request.Limit).Offset((request.Page - 1) * request.Limit).Find(&jobApplications).Error; err != nil {
+	if err := e.db.Order("created_at DESC").Where("id_user = ?", userId).Limit(request.Limit).Offset((request.Page - 1) * request.Limit).Find(&jobApplications).Error; err != nil {
 		e.logger.Printf("Failed to fetch job applications: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch job applications"})
 		return
 	}
 
 	var total int64
-	if err := e.db.Model(&model.JobApplication{}).Where("user_id = ?", userId).Count(&total).Error; err != nil {
+	if err := e.db.Model(&model.JobApplication{}).Where("id_user = ?", userId).Count(&total).Error; err != nil {
 		e.logger.Printf("Failed to fetch total job applications: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch total job applications"})
 		return
