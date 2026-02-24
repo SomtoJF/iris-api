@@ -21,11 +21,15 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
-		log.Fatal(err)
-	}
+	// if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	if err := db.AutoMigrate(&model.Resume{}); err != nil {
+	// if err := db.AutoMigrate(&model.Resume{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	if err := db.AutoMigrate(&model.JobApplicationProfile{}); err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Migration completed")
