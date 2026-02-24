@@ -5,18 +5,20 @@ import (
 
 	"github.com/SomtoJF/iris-api/initializers/sqldb"
 	"github.com/SomtoJF/iris-api/model"
+	"gorm.io/gorm"
 )
 
+var db *gorm.DB
+
 func init() {
-	err := sqldb.ConnectToSQLite()
+	var err error
+	db, err = sqldb.ConnectToSQLite()
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
 func main() {
-	db := sqldb.DB
-
 	if err := db.AutoMigrate(&model.User{}); err != nil {
 		log.Fatal(err)
 	}
