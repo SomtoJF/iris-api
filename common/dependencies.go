@@ -58,12 +58,10 @@ func MakeDependencies() (Dependencies, error) {
 		return nil, err
 	}
 
-	err = sqldb.ConnectToSQLite()
+	db, err := sqldb.ConnectToSQLite()
 	if err != nil {
 		return nil, err
 	}
-
-	db := sqldb.DB
 
 	err = redisInit.ConnectToRedis()
 	if err != nil {
