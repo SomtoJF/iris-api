@@ -155,8 +155,27 @@ func (e *Endpoint) Signup(c *gin.Context) {
 		PasswordHash: string(passwordHash),
 	}
 
-	if err := e.DB.Create(&user).Error; err != nil {
+	tx := e.DB.Begin()
+
+	if err := tx.Create(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error creating user: %s", err)})
+		return
+	}
+
+	jobApplicationProfile := model.JobApplicationProfile{
+		UserId:    user.IdUser,
+		FirstName: body.FirstName,
+		LastName:  body.LastName,
+		Email:     body.Email,
+	}
+
+	if err := tx.Create(&jobApplicationProfile).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error creating job application profile: %s", err)})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error committing transaction: %s", err)})
 		return
 	}
 
@@ -257,6 +276,18 @@ func (e *Endpoint) ResetPassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Password updated successfully. Please login with new password"})
 }
 
+type GetUserResponse struct {
+	Id                         string     `json:"id"`
+	Email                      string     `json:"email"`
+	FirstName                  string     `json:"firstName"`
+	LastName                   string     `json:"lastName"`
+	IsOnboardingComplete       bool       `json:"isOnboardingComplete"`
+	IsResumeOnboardingComplete bool       `json:"isResumeOnboardingComplete"`
+	CreatedAt                  time.Time  `json:"createdAt"`
+	UpdatedAt                  time.Time  `json:"updatedAt"`
+	DeletedAt                  *time.Time `json:"deletedAt"`
+}
+
 // GetCurrentUser godoc
 //
 //	@Summary		Get current user
@@ -266,10 +297,44 @@ func (e *Endpoint) ResetPassword(c *gin.Context) {
 //	@Failure		500	{object}	map[string]interface{}	"Internal server error"
 //	@Router			/me [get]
 func (e *Endpoint) GetCurrentUser(c *gin.Context) {
-	user := c.Value("currentUser")
-	if user == nil {
+	user, ok := c.Value("currentUser").(model.User)
+	if !ok {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "We couldn't retrieve your data"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": user})
+	c.JSON(http.StatusOK, gin.H{"data": GetUserResponse{
+		Id:                   user.IdExternal.String(),
+		Email:                user.Email,
+		FirstName:            user.FirstName,
+		LastName:             user.LastName,
+		IsOnboardingComplete: e.isOnboardingComplete(user.IdUser),
+		CreatedAt:            user.CreatedAt,
+		UpdatedAt:            user.UpdatedAt,
+		DeletedAt:            user.DeletedAt,
+	}})
+}
+
+// isOnboardingComplete returns false if the user has no job_application_profile
+// or if any profile field required for onboarding is empty.
+func (e *Endpoint) isOnboardingComplete(userID uint) bool {
+	var profile model.JobApplicationProfile
+	if err := e.DB.Where("id_user = ?", userID).First(&profile).Error; err != nil {
+		return false
+	}
+	if profile.FirstName == "" || profile.LastName == "" || profile.Email == "" ||
+		profile.Phone == "" || profile.Address == "" || profile.City == "" ||
+		profile.State == "" || profile.Zip == "" || profile.CountryOfResidence == "" ||
+		profile.Gender == "" || profile.DateOfBirth.IsZero() ||
+		len(profile.CountriesOfCitizenship) == 0 {
+		return false
+	}
+	return true
+}
+
+func (e *Endpoint) isResumeOnboardingComplete(userID uint) bool {
+	var resume model.Resume
+	if err := e.DB.Unscoped().Where("id_user = ?", userID).First(&resume).Error; err != nil {
+		return false
+	}
+	return true
 }

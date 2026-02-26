@@ -11,9 +11,9 @@ type JobApplicationProfile struct {
 	IdJobApplicationProfile uint       `gorm:"primaryKey;autoIncrement;column:id_job_application_profile" json:"_"`
 	IdExternal              uuid.UUID  `gorm:"type:text;not null;unique" json:"id"`
 	UserId                  uint       `gorm:"column:id_user;not null;uniqueIndex"`
-	FirstName               string     `json:"first_name"`
-	LastName                string     `json:"last_name"`
-	Email                   string     `json:"email"`
+	FirstName               string     `json:"first_name" gorm:"not null"`
+	LastName                string     `json:"last_name" gorm:"not null"`
+	Email                   string     `json:"email" gorm:"not null"`
 	Phone                   string     `json:"phone"`
 	Address                 string     `json:"address"`
 	City                    string     `json:"city"`

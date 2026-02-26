@@ -3,6 +3,7 @@ package resume
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -12,20 +13,24 @@ import (
 
 	"github.com/SomtoJF/iris-api/model"
 	s3pkg "github.com/SomtoJF/iris-api/pkg/s3"
+	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/SomtoJF/iris-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
 )
 
 type Endpoint struct {
-	db        *gorm.DB
-	s3Manager *s3pkg.S3Manager
-	logger    *log.Logger
+	db             *gorm.DB
+	s3Manager      *s3pkg.S3Manager
+	logger         *log.Logger
+	temporalClient client.Client
+	taskQueueName  temporal.TaskQueueName
 }
 
-func NewEndpoint(db *gorm.DB, s3Manager *s3pkg.S3Manager, logger *log.Logger) *Endpoint {
-	return &Endpoint{db: db, s3Manager: s3Manager, logger: logger}
+func NewEndpoint(db *gorm.DB, s3Manager *s3pkg.S3Manager, logger *log.Logger, temporalClient client.Client, taskQueueName temporal.TaskQueueName) *Endpoint {
+	return &Endpoint{db: db, s3Manager: s3Manager, logger: logger, temporalClient: temporalClient, taskQueueName: taskQueueName}
 }
 
 type ResumeDTO struct {
@@ -140,6 +145,8 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 	}
 	defer file.Close()
 
+	shouldProcessResume := c.PostForm("processResume") == "true"
+
 	// Validate file extension
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	if ext != ".pdf" && ext != ".doc" && ext != ".docx" {
@@ -210,6 +217,17 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 		return
 	}
 
+	if shouldProcessResume {
+		if err := e.processResumeWorkflow(ctx, processResumeWorkflowInput{
+			IdUser:        userId,
+			IdResume:      resume.IdResume,
+			ResumeContent: resume.Content,
+		}); err != nil {
+			// Just log the error and continue
+			e.logger.Printf("Process resume workflow failed: %v", err)
+		}
+	}
+
 	c.JSON(http.StatusCreated, gin.H{"data": ResumeDTO{
 		Id:        resume.IdExternal.String(),
 		FileName:  resume.FileName,
@@ -219,6 +237,31 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 		CreatedAt: resume.CreatedAt,
 		UpdatedAt: resume.UpdatedAt,
 	}})
+}
+
+type processResumeWorkflowInput struct {
+	IdUser        uint   `json:"id_user"`
+	IdResume      uint   `json:"id_resume"`
+	ResumeContent string `json:"resume_content"`
+}
+
+func (e *Endpoint) processResumeWorkflow(ctx context.Context, input processResumeWorkflowInput) error {
+	workflowID := fmt.Sprintf("process-resume-%d-%d-%d", input.IdUser, input.IdResume, time.Now().Unix())
+	options := client.StartWorkflowOptions{
+		ID:                       workflowID,
+		TaskQueue:                string(e.taskQueueName),
+		WorkflowExecutionTimeout: 10 * time.Minute,
+		WorkflowTaskTimeout:      1 * time.Minute,
+	}
+	run, err := e.temporalClient.ExecuteWorkflow(ctx, options, "ProcessResumeWorkflow", input)
+	if err != nil {
+		return err
+	}
+	var workflowErr error
+	if err := run.Get(ctx, &workflowErr); err != nil {
+		return err
+	}
+	return workflowErr
 }
 
 func (e *Endpoint) DeleteResume(c *gin.Context) {
