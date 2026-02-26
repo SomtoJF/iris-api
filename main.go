@@ -8,6 +8,7 @@ import (
 	"github.com/SomtoJF/iris-api/endpoints/auth"
 	"github.com/SomtoJF/iris-api/endpoints/health"
 	"github.com/SomtoJF/iris-api/endpoints/job"
+	"github.com/SomtoJF/iris-api/endpoints/jobapplicationprofile"
 	realtimeeventsse "github.com/SomtoJF/iris-api/endpoints/realtimeeventssse"
 	"github.com/SomtoJF/iris-api/endpoints/resume"
 	"github.com/SomtoJF/iris-api/initializers/env"
@@ -60,7 +61,7 @@ func main() {
 	jobEndpoint := job.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 	realtimeEventsEndpoint := realtimeeventsse.NewEndpoint(redisPubSub, logger)
 	resumeEndpoint := resume.NewEndpoint(db, s3Manager, logger, temporalClient, temporal.JobApplicationTaskQueueName)
-
+	jobApplicationProfileEndpoint := jobapplicationprofile.NewEndpoint(db, logger)
 	authMiddleware := verifyauth.NewMiddleware(db)
 
 	public := r.Group("/")
@@ -88,6 +89,9 @@ func main() {
 		protected.PUT("/resumes/:id/activate", resumeEndpoint.SetResumeAsActive)
 		protected.DELETE("/resumes/:id", resumeEndpoint.DeleteResume)
 		protected.GET("/resumes/:id/download", resumeEndpoint.GetResumeDownloadUrl)
+
+		protected.GET("/jobapplicationprofile", jobApplicationProfileEndpoint.GetJobApplicationProfile)
+		protected.PUT("/jobapplicationprofile", jobApplicationProfileEndpoint.UpdateJobApplicationProfile)
 	}
 
 	port := os.Getenv("PORT")
