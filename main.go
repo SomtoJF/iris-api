@@ -91,7 +91,7 @@ func main() {
 		protected.GET("/resumes/:id/download", resumeEndpoint.GetResumeDownloadUrl)
 
 		protected.GET("/jobapplicationprofile", jobApplicationProfileEndpoint.GetJobApplicationProfile)
-		protected.PUT("/jobapplicationprofile", jobApplicationProfileEndpoint.UpdateJobApplicationProfile)
+		protected.POST("/jobapplicationprofile", jobApplicationProfileEndpoint.UpsertJobApplicationProfile)
 	}
 
 	port := os.Getenv("PORT")

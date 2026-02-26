@@ -37,6 +37,7 @@ type UpdateJobApplicationProfileRequest struct {
 }
 
 type GetJobApplicationProfileResponse struct {
+	Id                     string   `json:"id"`
 	FirstName              string   `json:"firstName"`
 	LastName               string   `json:"lastName"`
 	Email                  string   `json:"email"`
@@ -69,6 +70,7 @@ func (e *Endpoint) GetJobApplicationProfile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": GetJobApplicationProfileResponse{
+		Id:                     jobApplicationProfile.IdExternal.String(),
 		FirstName:              jobApplicationProfile.FirstName,
 		LastName:               jobApplicationProfile.LastName,
 		Email:                  jobApplicationProfile.Email,
@@ -85,15 +87,8 @@ func (e *Endpoint) GetJobApplicationProfile(c *gin.Context) {
 	}})
 }
 
-// put /jobapplicationprofile
-func (e *Endpoint) UpdateJobApplicationProfile(c *gin.Context) {
-	var input UpdateJobApplicationProfileRequest
-	if err := c.ShouldBindJSON(&input); err != nil {
-		e.logger.Printf("Failed to bind JSON: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to bind JSON"})
-		return
-	}
-
+// post /jobapplicationprofile
+func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
 		e.logger.Printf("Unauthorized user: %d", userId)
@@ -101,27 +96,58 @@ func (e *Endpoint) UpdateJobApplicationProfile(c *gin.Context) {
 		return
 	}
 
-	var jobApplicationProfile model.JobApplicationProfile
-	if err := e.db.Where("id_user = ?", userId).First(&jobApplicationProfile).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			e.logger.Printf("Job application profile not found for user %d", userId)
-			c.JSON(http.StatusNotFound, gin.H{"error": "Job application profile not found"})
-			return
-		}
-		e.logger.Printf("Failed to find job application profile: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find job application profile"})
+	var input UpdateJobApplicationProfileRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		e.logger.Printf("Failed to bind JSON: %v", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to bind JSON"})
 		return
 	}
 
 	dateOfBirth, err := time.Parse(time.RFC3339, input.DateOfBirth)
 	if err != nil {
-		// Try date-only ISO 8601
 		dateOfBirth, err = time.Parse("2006-01-02", input.DateOfBirth)
 		if err != nil {
 			e.logger.Printf("Invalid date of birth format: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid dateOfBirth; use ISO 8601 format (e.g. 2006-01-02)"})
 			return
 		}
+	}
+
+	var jobApplicationProfile model.JobApplicationProfile
+	err = e.db.Where("id_user = ?", userId).First(&jobApplicationProfile).Error
+	if err != nil && err != gorm.ErrRecordNotFound {
+		e.logger.Printf("Failed to find job application profile: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find job application profile"})
+		return
+	}
+
+	if err == gorm.ErrRecordNotFound {
+		jobApplicationProfile = model.JobApplicationProfile{
+			UserId:                  userId,
+			FirstName:               input.FirstName,
+			LastName:                input.LastName,
+			Email:                   input.Email,
+			Phone:                   input.Phone,
+			Address:                input.Address,
+			City:                    input.City,
+			State:                   input.State,
+			Zip:                     input.Zip,
+			CountryOfResidence:      input.CountryOfResidence,
+			IsVeteran:               input.IsVeteran,
+			CountriesOfCitizenship:  input.CountriesOfCitizenship,
+			Gender:                  input.Gender,
+			DateOfBirth:             dateOfBirth,
+		}
+		if err := e.db.Create(&jobApplicationProfile).Error; err != nil {
+			e.logger.Printf("Failed to create job application profile: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job application profile"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Job application profile created successfully",
+			"data":    jobApplicationProfile,
+		})
+		return
 	}
 
 	jobApplicationProfile.FirstName = input.FirstName
