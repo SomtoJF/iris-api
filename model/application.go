@@ -13,6 +13,7 @@ const (
 	JobApplicationStatusPending JobApplicationStatus = "processing"
 	JobApplicationStatusApplied JobApplicationStatus = "applied"
 	JobApplicationStatusFailed  JobApplicationStatus = "failed"
+	JobApplicationStatusBlocked JobApplicationStatus = "blocked"
 )
 
 type JobApplication struct {

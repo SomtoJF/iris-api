@@ -16,7 +16,7 @@ type ActionType string
 const (
 	ActionApplicationSuccessful ActionType = "APPLICATION_SUCCESSFUL"
 	ActionApplicationFailed     ActionType = "APPLICATION_FAILED"
-	ActionUserActionRequired    ActionType = "USER_ACTION_REQUIRED"
+	ActionUserActionRequired    ActionType = "USER_NOTIFICATION"
 )
 
 // Event represents a real-time event to be sent to clients

@@ -31,9 +31,10 @@ type ApplyForJobRequest struct {
 }
 
 type JobApplicationWorkflowInput struct {
-	Url              string `json:"url"`
-	IdUser           uint   `json:"id_user"`
-	IdJobApplication uint   `json:"id_job_application"`
+	Url                   string `json:"url"`
+	IdUser                uint   `json:"id_user"`
+	IdJobApplication      uint   `json:"id_job_application"`
+	ApplicationExternalId string `json:"application_external_id"`
 }
 
 func (e *Endpoint) ApplyForJob(c *gin.Context) {
@@ -78,9 +79,10 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	}
 
 	workflowInput := JobApplicationWorkflowInput{
-		Url:              request.Url,
-		IdJobApplication: jobApplication.IdJobApplication,
-		IdUser:           userId,
+		Url:                   request.Url,
+		IdJobApplication:      jobApplication.IdJobApplication,
+		IdUser:                userId,
+		ApplicationExternalId: jobApplication.IdExternal.String(),
 	}
 	_, err := e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", workflowInput)
 	if err != nil {
