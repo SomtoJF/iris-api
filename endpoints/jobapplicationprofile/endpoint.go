@@ -19,7 +19,7 @@ func NewEndpoint(db *gorm.DB, logger *log.Logger) *Endpoint {
 	return &Endpoint{db: db, logger: logger}
 }
 
-type UpdateJobApplicationProfileRequest struct {
+type UpsertJobApplicationProfileRequest struct {
 	FirstName              string   `json:"firstName" binding:"required"`
 	LastName               string   `json:"lastName" binding:"required"`
 	Email                  string   `json:"email" binding:"required,email"`
@@ -29,7 +29,7 @@ type UpdateJobApplicationProfileRequest struct {
 	State                  string   `json:"state" binding:"required"`
 	Zip                    string   `json:"zip" binding:"required"`
 	CountryOfResidence     string   `json:"countryOfResidence" binding:"required"`
-	IsVeteran              bool     `json:"isVeteran" binding:"required"`
+	IsVeteran              bool     `json:"isVeteran"`
 	CountriesOfCitizenship []string `json:"countriesOfCitizenship" binding:"required"`
 	Gender                 string   `json:"gender" binding:"required"`
 	// Date of birth in ISO 8601 format
@@ -96,7 +96,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 		return
 	}
 
-	var input UpdateJobApplicationProfileRequest
+	var input UpsertJobApplicationProfileRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
 		e.logger.Printf("Failed to bind JSON: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to bind JSON"})
@@ -123,20 +123,20 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 
 	if err == gorm.ErrRecordNotFound {
 		jobApplicationProfile = model.JobApplicationProfile{
-			UserId:                  userId,
-			FirstName:               input.FirstName,
-			LastName:                input.LastName,
-			Email:                   input.Email,
-			Phone:                   input.Phone,
+			UserId:                 userId,
+			FirstName:              input.FirstName,
+			LastName:               input.LastName,
+			Email:                  input.Email,
+			Phone:                  input.Phone,
 			Address:                input.Address,
-			City:                    input.City,
-			State:                   input.State,
-			Zip:                     input.Zip,
-			CountryOfResidence:      input.CountryOfResidence,
-			IsVeteran:               input.IsVeteran,
-			CountriesOfCitizenship:  input.CountriesOfCitizenship,
-			Gender:                  input.Gender,
-			DateOfBirth:             dateOfBirth,
+			City:                   input.City,
+			State:                  input.State,
+			Zip:                    input.Zip,
+			CountryOfResidence:     input.CountryOfResidence,
+			IsVeteran:              input.IsVeteran,
+			CountriesOfCitizenship: input.CountriesOfCitizenship,
+			Gender:                 input.Gender,
+			DateOfBirth:            dateOfBirth,
 		}
 		if err := e.db.Create(&jobApplicationProfile).Error; err != nil {
 			e.logger.Printf("Failed to create job application profile: %v", err)

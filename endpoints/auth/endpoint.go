@@ -303,14 +303,15 @@ func (e *Endpoint) GetCurrentUser(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": GetUserResponse{
-		Id:                   user.IdExternal.String(),
-		Email:                user.Email,
-		FirstName:            user.FirstName,
-		LastName:             user.LastName,
-		IsOnboardingComplete: e.isOnboardingComplete(user.IdUser),
-		CreatedAt:            user.CreatedAt,
-		UpdatedAt:            user.UpdatedAt,
-		DeletedAt:            user.DeletedAt,
+		Id:                         user.IdExternal.String(),
+		Email:                      user.Email,
+		FirstName:                  user.FirstName,
+		LastName:                   user.LastName,
+		IsOnboardingComplete:       e.isOnboardingComplete(user.IdUser),
+		IsResumeOnboardingComplete: e.isResumeOnboardingComplete(user.IdUser),
+		CreatedAt:                  user.CreatedAt,
+		UpdatedAt:                  user.UpdatedAt,
+		DeletedAt:                  user.DeletedAt,
 	}})
 }
 
