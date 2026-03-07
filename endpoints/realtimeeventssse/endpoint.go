@@ -139,11 +139,12 @@ func jsonStringify(data interface{}) string {
 // @Failure 500 {object} map[string]interface{} "Internal server error"
 // @Router /realtime/test [post]
 func (e *Endpoint) TriggerTestEvent(c *gin.Context) {
-	// TODO: When auth is ready, get user ID from context instead of hardcoding
-	// userID, exists := c.Get("IdUser")
-	// userIDUint := userID.(uint)
-	// userIDStr := fmt.Sprintf("%d", userIDUint)
-	userIDStr := "anonymous"
+	userID := c.GetUint("userId")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	userIDStr := fmt.Sprintf("%d", userID)
 
 	// Parse request body
 	var requestData map[string]interface{}
@@ -161,7 +162,7 @@ func (e *Endpoint) TriggerTestEvent(c *gin.Context) {
 	}
 
 	// Send test event
-	err := e.redisPubSub.PublishToUser(c.Request.Context(), userIDStr, redispubsub.ActionUserActionRequired, testData)
+	err := e.redisPubSub.PublishToUser(c.Request.Context(), userIDStr, redispubsub.EventUserActionRequired, testData)
 	if err != nil {
 		log.Printf("Failed to publish test event: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send test event"})

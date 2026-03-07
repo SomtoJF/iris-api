@@ -11,17 +11,17 @@ import (
 )
 
 // ActionType represents the type of action being sent
-type ActionType string
+type EventType string
 
 const (
-	ActionApplicationSuccessful ActionType = "APPLICATION_SUCCESSFUL"
-	ActionApplicationFailed     ActionType = "APPLICATION_FAILED"
-	ActionUserActionRequired    ActionType = "USER_NOTIFICATION"
+	EventApplicationSuccessful EventType = "APPLICATION_SUCCESSFUL"
+	EventApplicationFailed     EventType = "APPLICATION_FAILED"
+	EventUserActionRequired    EventType = "USER_NOTIFICATION"
 )
 
 // Event represents a real-time event to be sent to clients
 type Event struct {
-	Action ActionType  `json:"action"`
+	Action EventType   `json:"action"`
 	Data   interface{} `json:"data"`
 }
 
@@ -43,7 +43,7 @@ func (r *RedisPubSub) GetUserChannel(userID string) string {
 }
 
 // PublishToUser publishes an event to a specific user's channel
-func (r *RedisPubSub) PublishToUser(ctx context.Context, userID string, action ActionType, data interface{}) error {
+func (r *RedisPubSub) PublishToUser(ctx context.Context, userID string, action EventType, data interface{}) error {
 	event := Event{
 		Action: action,
 		Data:   data,
@@ -156,7 +156,7 @@ func (r *RedisPubSub) SubscribeToChannel(ctx context.Context, channel string) (<
 }
 
 // PublishToChannel publishes an event to a specific channel
-func (r *RedisPubSub) PublishToChannel(ctx context.Context, channel string, action ActionType, data interface{}) error {
+func (r *RedisPubSub) PublishToChannel(ctx context.Context, channel string, action EventType, data interface{}) error {
 	event := Event{
 		Action: action,
 		Data:   data,
@@ -177,7 +177,7 @@ func (r *RedisPubSub) PublishToChannel(ctx context.Context, channel string, acti
 }
 
 // PublishToAllUsers publishes an event to all active user channels
-func (r *RedisPubSub) PublishToAllUsers(ctx context.Context, action ActionType, data interface{}) error {
+func (r *RedisPubSub) PublishToAllUsers(ctx context.Context, action EventType, data interface{}) error {
 	// Get all user channels pattern
 	pattern := "user:*:events"
 	keys, err := r.client.Keys(ctx, pattern).Result()
