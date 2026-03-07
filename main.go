@@ -80,6 +80,7 @@ func main() {
 		protected.GET("/me", authEndpoint.GetCurrentUser)
 
 		protected.POST("/jobs/apply", jobEndpoint.ApplyForJob)
+		protected.POST("/jobs/:id/retry-application", jobEndpoint.RetryApplication)
 		protected.GET("/jobs", jobEndpoint.FetchAllJobApplications)
 
 		protected.GET("/realtime/events", realtimeEventsEndpoint.StreamEvents)

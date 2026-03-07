@@ -11,6 +11,7 @@ import (
 	"github.com/SomtoJF/iris-api/model"
 	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
 )
@@ -72,7 +73,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	}
 
 	workflowOptions := client.StartWorkflowOptions{
-		ID:                       fmt.Sprintf("job-application-%s-%d", request.Url, time.Now().Unix()),
+		ID:                       fmt.Sprintf("job-application-%s-%s", request.Url, uuid.New().String()),
 		TaskQueue:                string(e.taskQueueName),
 		WorkflowExecutionTimeout: 40 * time.Minute,
 		WorkflowTaskTimeout:      1 * time.Minute,
@@ -94,9 +95,59 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "Job application initiated"})
 }
 
+// post /job/:id/retry-application
+func (e *Endpoint) RetryApplication(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		return
+	}
+
+	var jobApplication model.JobApplication
+	if err := e.db.Where("id_external = ? AND id_user = ?", id, userId).First(&jobApplication).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+		return
+	}
+
+	if err := e.db.Model(&jobApplication).Update("status", model.JobApplicationStatusPending).Error; err != nil {
+		e.logger.Printf("Failed to update job application status: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application status"})
+		return
+	}
+
+	workflowOptions := client.StartWorkflowOptions{
+		ID:                       fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String()),
+		TaskQueue:                string(e.taskQueueName),
+		WorkflowExecutionTimeout: 40 * time.Minute,
+		WorkflowTaskTimeout:      1 * time.Minute,
+	}
+
+	workflowInput := JobApplicationWorkflowInput{
+		Url:                   jobApplication.Url,
+		IdJobApplication:      jobApplication.IdJobApplication,
+		IdUser:                userId,
+		ApplicationExternalId: jobApplication.IdExternal.String(),
+	}
+	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", workflowInput)
+	if err != nil {
+		e.logger.Printf("Failed to start job application process: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start job application process"})
+		return
+	}
+
+	c.JSON(http.StatusAccepted, gin.H{"message": "Job application initiated"})
+}
+
 type FetchAllJobApplicationsRequest struct {
-	Page  int `form:"page" binding:"required"`
-	Limit int `form:"limit" binding:"required"`
+	Page   int    `form:"page" binding:"required"`
+	Limit  int    `form:"limit" binding:"required"`
+	Search string `form:"search"`
 }
 
 type JobApplication struct {
@@ -130,15 +181,20 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 		return
 	}
 
+	baseQuery := e.db.Model(&model.JobApplication{}).Where("id_user = ?", userId)
+	if request.Search != "" {
+		baseQuery = baseQuery.Where("job_title LIKE ? OR company_name LIKE ?", "%"+request.Search+"%", "%"+request.Search+"%")
+	}
+
 	var jobApplications []model.JobApplication
-	if err := e.db.Order("created_at DESC").Where("id_user = ?", userId).Limit(request.Limit).Offset((request.Page - 1) * request.Limit).Find(&jobApplications).Error; err != nil {
+	if err := baseQuery.Order("created_at DESC").Limit(request.Limit).Offset((request.Page - 1) * request.Limit).Find(&jobApplications).Error; err != nil {
 		e.logger.Printf("Failed to fetch job applications: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch job applications"})
 		return
 	}
 
 	var total int64
-	if err := e.db.Model(&model.JobApplication{}).Where("id_user = ?", userId).Count(&total).Error; err != nil {
+	if err := baseQuery.Count(&total).Error; err != nil {
 		e.logger.Printf("Failed to fetch total job applications: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch total job applications"})
 		return
