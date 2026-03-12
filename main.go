@@ -93,6 +93,7 @@ func main() {
 
 		protected.GET("/jobapplicationprofile", jobApplicationProfileEndpoint.GetJobApplicationProfile)
 		protected.POST("/jobapplicationprofile", jobApplicationProfileEndpoint.UpsertJobApplicationProfile)
+		protected.PATCH("/jobapplicationprofile", jobApplicationProfileEndpoint.PatchJobApplicationProfile)
 	}
 
 	port := os.Getenv("PORT")

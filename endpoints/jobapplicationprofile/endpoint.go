@@ -175,3 +175,133 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 		"data":    jobApplicationProfile,
 	})
 }
+
+type PatchJobApplicationProfileRequest struct {
+	FirstName              *string   `json:"firstName"`
+	LastName               *string   `json:"lastName"`
+	Email                  *string   `json:"email"`
+	Phone                  *string   `json:"phone"`
+	Address                *string   `json:"address"`
+	City                   *string   `json:"city"`
+	State                  *string   `json:"state"`
+	Zip                    *string   `json:"zip"`
+	CountryOfResidence     *string   `json:"countryOfResidence"`
+	IsVeteran              *bool     `json:"isVeteran"`
+	CountriesOfCitizenship *[]string `json:"countriesOfCitizenship"`
+	Gender                 *string   `json:"gender"`
+	DateOfBirth            *string   `json:"dateOfBirth"`
+}
+
+// patch /jobapplicationprofile
+func (e *Endpoint) PatchJobApplicationProfile(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var input PatchJobApplicationProfileRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	var profile model.JobApplicationProfile
+	if err := e.db.Where("id_user = ?", userId).First(&profile).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job application profile not found"})
+		return
+	}
+
+	updates := buildProfileUpdateMap(input)
+	if len(updates) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No fields to update"})
+		return
+	}
+
+	if input.DateOfBirth != nil {
+		parsed, err := parseDateOfBirth(*input.DateOfBirth)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid dateOfBirth; use ISO 8601 format (e.g. 2006-01-02)"})
+			return
+		}
+		updates["date_of_birth"] = parsed
+	}
+
+	if err := e.db.Model(&profile).Updates(updates).Error; err != nil {
+		e.logger.Printf("Failed to patch job application profile: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application profile"})
+		return
+	}
+
+	// Reload for response
+	e.db.Where("id_user = ?", userId).First(&profile)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Job application profile updated successfully",
+		"data": GetJobApplicationProfileResponse{
+			Id:                     profile.IdExternal.String(),
+			FirstName:              profile.FirstName,
+			LastName:               profile.LastName,
+			Email:                  profile.Email,
+			Phone:                  profile.Phone,
+			Address:                profile.Address,
+			City:                   profile.City,
+			State:                  profile.State,
+			Zip:                    profile.Zip,
+			CountryOfResidence:     profile.CountryOfResidence,
+			IsVeteran:              profile.IsVeteran,
+			CountriesOfCitizenship: profile.CountriesOfCitizenship,
+			Gender:                 profile.Gender,
+			DateOfBirth:            profile.DateOfBirth.Format(time.RFC3339),
+		},
+	})
+}
+
+func buildProfileUpdateMap(input PatchJobApplicationProfileRequest) map[string]interface{} {
+	updates := map[string]interface{}{}
+	if input.FirstName != nil {
+		updates["first_name"] = *input.FirstName
+	}
+	if input.LastName != nil {
+		updates["last_name"] = *input.LastName
+	}
+	if input.Email != nil {
+		updates["email"] = *input.Email
+	}
+	if input.Phone != nil {
+		updates["phone"] = *input.Phone
+	}
+	if input.Address != nil {
+		updates["address"] = *input.Address
+	}
+	if input.City != nil {
+		updates["city"] = *input.City
+	}
+	if input.State != nil {
+		updates["state"] = *input.State
+	}
+	if input.Zip != nil {
+		updates["zip"] = *input.Zip
+	}
+	if input.CountryOfResidence != nil {
+		updates["country_of_residence"] = *input.CountryOfResidence
+	}
+	if input.IsVeteran != nil {
+		updates["is_veteran"] = *input.IsVeteran
+	}
+	if input.CountriesOfCitizenship != nil {
+		updates["countries_of_citizenship"] = *input.CountriesOfCitizenship
+	}
+	if input.Gender != nil {
+		updates["gender"] = *input.Gender
+	}
+	return updates
+}
+
+func parseDateOfBirth(s string) (time.Time, error) {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		t, err = time.Parse("2006-01-02", s)
+	}
+	return t, err
+}
