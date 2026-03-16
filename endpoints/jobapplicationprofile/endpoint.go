@@ -81,7 +81,7 @@ func (e *Endpoint) GetJobApplicationProfile(c *gin.Context) {
 		Zip:                    jobApplicationProfile.Zip,
 		CountryOfResidence:     jobApplicationProfile.CountryOfResidence,
 		IsVeteran:              jobApplicationProfile.IsVeteran,
-		CountriesOfCitizenship: jobApplicationProfile.CountriesOfCitizenship,
+		CountriesOfCitizenship: []string(jobApplicationProfile.CountriesOfCitizenship),
 		Gender:                 jobApplicationProfile.Gender,
 		DateOfBirth:            jobApplicationProfile.DateOfBirth.Format(time.RFC3339),
 	}})
@@ -134,7 +134,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 			Zip:                    input.Zip,
 			CountryOfResidence:     input.CountryOfResidence,
 			IsVeteran:              input.IsVeteran,
-			CountriesOfCitizenship: input.CountriesOfCitizenship,
+			CountriesOfCitizenship: model.StringSlice(input.CountriesOfCitizenship),
 			Gender:                 input.Gender,
 			DateOfBirth:            dateOfBirth,
 		}
@@ -160,7 +160,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 	jobApplicationProfile.Zip = input.Zip
 	jobApplicationProfile.CountryOfResidence = input.CountryOfResidence
 	jobApplicationProfile.IsVeteran = input.IsVeteran
-	jobApplicationProfile.CountriesOfCitizenship = input.CountriesOfCitizenship
+	jobApplicationProfile.CountriesOfCitizenship = model.StringSlice(input.CountriesOfCitizenship)
 	jobApplicationProfile.Gender = input.Gender
 	jobApplicationProfile.DateOfBirth = dateOfBirth
 
@@ -250,7 +250,7 @@ func (e *Endpoint) PatchJobApplicationProfile(c *gin.Context) {
 			Zip:                    profile.Zip,
 			CountryOfResidence:     profile.CountryOfResidence,
 			IsVeteran:              profile.IsVeteran,
-			CountriesOfCitizenship: profile.CountriesOfCitizenship,
+			CountriesOfCitizenship: []string(profile.CountriesOfCitizenship),
 			Gender:                 profile.Gender,
 			DateOfBirth:            profile.DateOfBirth.Format(time.RFC3339),
 		},
@@ -290,7 +290,7 @@ func buildProfileUpdateMap(input PatchJobApplicationProfileRequest) map[string]i
 		updates["is_veteran"] = *input.IsVeteran
 	}
 	if input.CountriesOfCitizenship != nil {
-		updates["countries_of_citizenship"] = *input.CountriesOfCitizenship
+		updates["countries_of_citizenship"] = model.StringSlice(*input.CountriesOfCitizenship)
 	}
 	if input.Gender != nil {
 		updates["gender"] = *input.Gender

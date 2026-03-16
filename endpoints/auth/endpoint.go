@@ -322,6 +322,8 @@ func (e *Endpoint) isOnboardingComplete(userID uint) bool {
 	if err := e.DB.Where("id_user = ?", userID).First(&profile).Error; err != nil {
 		return false
 	}
+
+	fmt.Println(profile)
 	if profile.FirstName == "" || profile.LastName == "" || profile.Email == "" ||
 		profile.Phone == "" || profile.Address == "" || profile.City == "" ||
 		profile.State == "" || profile.Zip == "" || profile.CountryOfResidence == "" ||
