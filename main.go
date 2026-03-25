@@ -11,6 +11,7 @@ import (
 	"github.com/SomtoJF/iris-api/endpoints/jobapplicationprofile"
 	realtimeeventsse "github.com/SomtoJF/iris-api/endpoints/realtimeeventssse"
 	"github.com/SomtoJF/iris-api/endpoints/resume"
+	workflowendpoint "github.com/SomtoJF/iris-api/endpoints/workflow"
 	"github.com/SomtoJF/iris-api/initializers/env"
 	"github.com/SomtoJF/iris-api/middleware/verifyauth"
 	"github.com/SomtoJF/iris-api/temporal"
@@ -62,6 +63,7 @@ func main() {
 	realtimeEventsEndpoint := realtimeeventsse.NewEndpoint(redisPubSub, logger)
 	resumeEndpoint := resume.NewEndpoint(db, s3Manager, logger, temporalClient, temporal.JobApplicationTaskQueueName)
 	jobApplicationProfileEndpoint := jobapplicationprofile.NewEndpoint(db, logger)
+	workflowEndpoint := workflowendpoint.NewEndpoint(temporalClient, logger)
 	authMiddleware := verifyauth.NewMiddleware(db)
 
 	public := r.Group("/")
@@ -94,6 +96,8 @@ func main() {
 		protected.GET("/jobapplicationprofile", jobApplicationProfileEndpoint.GetJobApplicationProfile)
 		protected.POST("/jobapplicationprofile", jobApplicationProfileEndpoint.UpsertJobApplicationProfile)
 		protected.PATCH("/jobapplicationprofile", jobApplicationProfileEndpoint.PatchJobApplicationProfile)
+
+		protected.POST("/workflows/signal", workflowEndpoint.SendWorkflowSignal)
 	}
 
 	port := os.Getenv("PORT")
