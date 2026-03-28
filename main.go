@@ -6,6 +6,7 @@ import (
 
 	"github.com/SomtoJF/iris-api/common"
 	"github.com/SomtoJF/iris-api/endpoints/auth"
+	"github.com/SomtoJF/iris-api/endpoints/costtracking"
 	"github.com/SomtoJF/iris-api/endpoints/health"
 	"github.com/SomtoJF/iris-api/endpoints/job"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplicationprofile"
@@ -64,6 +65,7 @@ func main() {
 	resumeEndpoint := resume.NewEndpoint(db, s3Manager, logger, temporalClient, temporal.JobApplicationTaskQueueName)
 	jobApplicationProfileEndpoint := jobapplicationprofile.NewEndpoint(db, logger)
 	workflowEndpoint := workflowendpoint.NewEndpoint(temporalClient, logger)
+	costTrackingEndpoint := costtracking.NewEndpoint(db)
 	authMiddleware := verifyauth.NewMiddleware(db)
 
 	public := r.Group("/")
@@ -80,6 +82,9 @@ func main() {
 		protected.POST("/logout", authEndpoint.Logout)
 		protected.POST("/reset-password", authEndpoint.ResetPassword)
 		protected.GET("/me", authEndpoint.GetCurrentUser)
+
+		protected.GET("/cost", costTrackingEndpoint.GetCostTracking)
+		protected.GET("/cost/search", costTrackingEndpoint.SearchCostEntities)
 
 		protected.POST("/jobs/apply", jobEndpoint.ApplyForJob)
 		protected.POST("/jobs/:id/retry-application", jobEndpoint.RetryApplication)

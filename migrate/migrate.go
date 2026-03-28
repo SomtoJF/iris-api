@@ -19,9 +19,9 @@ func init() {
 }
 
 func main() {
-	if err := db.AutoMigrate(&model.User{}); err != nil {
-		log.Fatal(err)
-	}
+	// if err := db.AutoMigrate(&model.User{}); err != nil {
+	// 	log.Fatal(err)
+	// }
 
 	// if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
 	// 	log.Fatal(err)
@@ -38,5 +38,9 @@ func main() {
 	// if err := db.AutoMigrate(&model.JobApplicationProfile{}); err != nil {
 	// 	log.Fatal(err)
 	// }
-	// log.Println("Migration completed")
+
+	if err := db.AutoMigrate(&model.CostTracking{}); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Migration completed")
 }
