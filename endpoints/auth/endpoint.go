@@ -286,6 +286,7 @@ type GetUserResponse struct {
 	CreatedAt                  time.Time  `json:"createdAt"`
 	UpdatedAt                  time.Time  `json:"updatedAt"`
 	DeletedAt                  *time.Time `json:"deletedAt"`
+	IsAdmin                    bool       `json:"isAdmin"`
 }
 
 // GetCurrentUser godoc
@@ -312,6 +313,7 @@ func (e *Endpoint) GetCurrentUser(c *gin.Context) {
 		CreatedAt:                  user.CreatedAt,
 		UpdatedAt:                  user.UpdatedAt,
 		DeletedAt:                  user.DeletedAt,
+		IsAdmin:                    user.IsAdmin,
 	}})
 }
 
