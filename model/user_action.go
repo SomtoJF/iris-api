@@ -76,6 +76,7 @@ type UserAction struct {
 	UserActionType   UserActionType   `gorm:"type:text;not null"`
 	ActionDetails    string           `gorm:"type:text;not null"`
 	UserActionLayout UserActionLayout `gorm:"type:jsonb;not null"`
+	WorkflowID       string           `gorm:"type:text"`
 	IsPending        bool             `gorm:"default:true"`
 	CreatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt        time.Time        `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`

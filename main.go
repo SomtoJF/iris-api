@@ -66,6 +66,7 @@ func main() {
 	jobApplicationProfileEndpoint := jobapplicationprofile.NewEndpoint(db, logger)
 	workflowEndpoint := workflowendpoint.NewEndpoint(temporalClient, logger)
 	costTrackingEndpoint := costtracking.NewEndpoint(db)
+
 	authMiddleware := verifyauth.NewMiddleware(db)
 
 	public := r.Group("/")
@@ -88,6 +89,7 @@ func main() {
 
 		protected.POST("/jobs/apply", jobEndpoint.ApplyForJob)
 		protected.POST("/jobs/:id/retry-application", jobEndpoint.RetryApplication)
+		protected.GET("/jobs/:id/user-action", jobEndpoint.GetUserAction)
 		protected.GET("/jobs", jobEndpoint.FetchAllJobApplications)
 
 		protected.GET("/realtime/events", realtimeEventsEndpoint.StreamEvents)

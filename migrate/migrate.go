@@ -31,16 +31,16 @@ func main() {
 	// 	log.Fatal(err)
 	// }
 
-	// if err := db.AutoMigrate(&model.UserAction{}); err != nil {
-	// 	log.Fatal(err)
-	// }
+	if err := db.AutoMigrate(&model.UserAction{}); err != nil {
+		log.Fatal(err)
+	}
 
 	// if err := db.AutoMigrate(&model.JobApplicationProfile{}); err != nil {
 	// 	log.Fatal(err)
 	// }
 
-	if err := db.AutoMigrate(&model.CostTracking{}); err != nil {
-		log.Fatal(err)
-	}
+	// if err := db.AutoMigrate(&model.CostTracking{}); err != nil {
+	// 	log.Fatal(err)
+	// }
 	log.Println("Migration completed")
 }

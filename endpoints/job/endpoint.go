@@ -218,3 +218,49 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 		Limit: request.Limit,
 	}})
 }
+
+type UserActionResponse struct {
+	ID             uint                       `json:"id"`
+	UserActionType model.UserActionType       `json:"user_action_type"`
+	ActionDetails  string                     `json:"action_details"`
+	Layout         model.UserActionLayout     `json:"layout"`
+	WorkflowID     string                     `json:"workflow_id"`
+	SignalName     string                     `json:"signal_name"`
+}
+
+func (e *Endpoint) GetUserAction(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		return
+	}
+
+	var jobApp model.JobApplication
+	if err := e.db.Where("id_external = ? AND id_user = ?", id, userId).First(&jobApp).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+		return
+	}
+
+	var userAction model.UserAction
+	if err := e.db.Where("id_job_application = ? AND is_pending = ?", jobApp.IdJobApplication, true).
+		Order("created_at ASC").
+		First(&userAction).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No pending user action found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, UserActionResponse{
+		ID:             userAction.IdUserAction,
+		UserActionType: userAction.UserActionType,
+		ActionDetails:  userAction.ActionDetails,
+		Layout:         userAction.UserActionLayout,
+		WorkflowID:     userAction.WorkflowID,
+		SignalName:     "USER_ACTION_RESULT",
+	})
+}
