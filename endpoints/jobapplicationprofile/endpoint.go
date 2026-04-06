@@ -33,7 +33,11 @@ type UpsertJobApplicationProfileRequest struct {
 	CountriesOfCitizenship []string `json:"countriesOfCitizenship" binding:"required"`
 	Gender                 string   `json:"gender" binding:"required"`
 	// Date of birth in ISO 8601 format
-	DateOfBirth string `json:"dateOfBirth" binding:"required"`
+	DateOfBirth    string   `json:"dateOfBirth" binding:"required"`
+	SalaryMin      *float64 `json:"salaryMin"`
+	SalaryMax      *float64 `json:"salaryMax"`
+	SalaryCurrency string   `json:"salaryCurrency"`
+	Ethnicity      string   `json:"ethnicity"`
 }
 
 type GetJobApplicationProfileResponse struct {
@@ -51,6 +55,10 @@ type GetJobApplicationProfileResponse struct {
 	CountriesOfCitizenship []string `json:"countriesOfCitizenship"`
 	Gender                 string   `json:"gender"`
 	DateOfBirth            string   `json:"dateOfBirth"`
+	SalaryMin              *float64 `json:"salaryMin"`
+	SalaryMax              *float64 `json:"salaryMax"`
+	SalaryCurrency         string   `json:"salaryCurrency"`
+	Ethnicity              string   `json:"ethnicity"`
 }
 
 // get /jobapplicationprofile
@@ -84,6 +92,10 @@ func (e *Endpoint) GetJobApplicationProfile(c *gin.Context) {
 		CountriesOfCitizenship: []string(jobApplicationProfile.CountriesOfCitizenship),
 		Gender:                 jobApplicationProfile.Gender,
 		DateOfBirth:            jobApplicationProfile.DateOfBirth.Format(time.RFC3339),
+		SalaryMin:              jobApplicationProfile.SalaryMin,
+		SalaryMax:              jobApplicationProfile.SalaryMax,
+		SalaryCurrency:         jobApplicationProfile.SalaryCurrency,
+		Ethnicity:              jobApplicationProfile.Ethnicity,
 	}})
 }
 
@@ -137,6 +149,10 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 			CountriesOfCitizenship: model.StringSlice(input.CountriesOfCitizenship),
 			Gender:                 input.Gender,
 			DateOfBirth:            dateOfBirth,
+			SalaryMin:              input.SalaryMin,
+			SalaryMax:              input.SalaryMax,
+			SalaryCurrency:         input.SalaryCurrency,
+			Ethnicity:              input.Ethnicity,
 		}
 		if err := e.db.Create(&jobApplicationProfile).Error; err != nil {
 			e.logger.Printf("Failed to create job application profile: %v", err)
@@ -163,6 +179,10 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 	jobApplicationProfile.CountriesOfCitizenship = model.StringSlice(input.CountriesOfCitizenship)
 	jobApplicationProfile.Gender = input.Gender
 	jobApplicationProfile.DateOfBirth = dateOfBirth
+	jobApplicationProfile.SalaryMin = input.SalaryMin
+	jobApplicationProfile.SalaryMax = input.SalaryMax
+	jobApplicationProfile.SalaryCurrency = input.SalaryCurrency
+	jobApplicationProfile.Ethnicity = input.Ethnicity
 
 	if err := e.db.Save(&jobApplicationProfile).Error; err != nil {
 		e.logger.Printf("Failed to update job application profile: %v", err)
@@ -190,6 +210,10 @@ type PatchJobApplicationProfileRequest struct {
 	CountriesOfCitizenship *[]string `json:"countriesOfCitizenship"`
 	Gender                 *string   `json:"gender"`
 	DateOfBirth            *string   `json:"dateOfBirth"`
+	SalaryMin              *float64  `json:"salaryMin"`
+	SalaryMax              *float64  `json:"salaryMax"`
+	SalaryCurrency         *string   `json:"salaryCurrency"`
+	Ethnicity              *string   `json:"ethnicity"`
 }
 
 // patch /jobapplicationprofile
@@ -253,6 +277,10 @@ func (e *Endpoint) PatchJobApplicationProfile(c *gin.Context) {
 			CountriesOfCitizenship: []string(profile.CountriesOfCitizenship),
 			Gender:                 profile.Gender,
 			DateOfBirth:            profile.DateOfBirth.Format(time.RFC3339),
+			SalaryMin:              profile.SalaryMin,
+			SalaryMax:              profile.SalaryMax,
+			SalaryCurrency:         profile.SalaryCurrency,
+			Ethnicity:              profile.Ethnicity,
 		},
 	})
 }
@@ -294,6 +322,18 @@ func buildProfileUpdateMap(input PatchJobApplicationProfileRequest) map[string]i
 	}
 	if input.Gender != nil {
 		updates["gender"] = *input.Gender
+	}
+	if input.SalaryMin != nil {
+		updates["salary_min"] = *input.SalaryMin
+	}
+	if input.SalaryMax != nil {
+		updates["salary_max"] = *input.SalaryMax
+	}
+	if input.SalaryCurrency != nil {
+		updates["salary_currency"] = *input.SalaryCurrency
+	}
+	if input.Ethnicity != nil {
+		updates["ethnicity"] = *input.Ethnicity
 	}
 	return updates
 }

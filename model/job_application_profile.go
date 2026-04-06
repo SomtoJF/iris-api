@@ -65,10 +65,14 @@ type JobApplicationProfile struct {
 	State                   string     `json:"state"`
 	Zip                     string     `json:"zip"`
 	CountryOfResidence      string     `json:"country_of_residence"`
-	IsVeteran               bool       `json:"is_veteran"`
+	IsVeteran               bool        `json:"is_veteran"`
 	CountriesOfCitizenship  StringSlice `json:"countries_of_citizenship" gorm:"type:text"`
-	Gender                  string     `json:"gender"`
-	DateOfBirth             time.Time  `json:"date_of_birth"`
+	Gender                  string      `json:"gender"`
+	DateOfBirth             time.Time   `json:"date_of_birth"`
+	SalaryMin               *float64    `json:"salary_min" gorm:"default:NULL"`
+	SalaryMax               *float64    `json:"salary_max" gorm:"default:NULL"`
+	SalaryCurrency          string      `json:"salary_currency"`
+	Ethnicity               string      `json:"ethnicity"`
 	CreatedAt               time.Time  `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt               time.Time  `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
 	DeletedAt               *time.Time `gorm:"index;default:NULL"`
