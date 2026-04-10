@@ -24,7 +24,7 @@ FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 \
 	&& rm -rf /var/lib/apt/lists/*
 
-RUN useradd --create-home --home-dir /app --shell /usr/sbin/nologin --uid 1000 appuser
+RUN useradd --create-home --home-dir /app --shell /usr/sbin/nologin --uid 10001 appuser
 
 WORKDIR /app
 
