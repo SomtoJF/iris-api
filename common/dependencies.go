@@ -53,7 +53,14 @@ func (d *dependencies) Cleanup() {
 }
 
 func MakeDependencies() (Dependencies, error) {
-	temporalClient, err := client.Dial(client.Options{})
+	temporalHost := os.Getenv("TEMPORAL_HOST")
+	if temporalHost == "" {
+		temporalHost = "localhost:7233"
+	}
+
+	temporalClient, err := client.Dial(client.Options{
+		HostPort: temporalHost,
+	})
 	if err != nil {
 		return nil, err
 	}
