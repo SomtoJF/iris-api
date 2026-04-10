@@ -7,6 +7,7 @@ import (
 
 	"github.com/SomtoJF/iris-api/model"
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 )
 
@@ -146,7 +147,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 			Zip:                    input.Zip,
 			CountryOfResidence:     input.CountryOfResidence,
 			IsVeteran:              input.IsVeteran,
-			CountriesOfCitizenship: model.StringSlice(input.CountriesOfCitizenship),
+			CountriesOfCitizenship: pq.StringArray(input.CountriesOfCitizenship),
 			Gender:                 input.Gender,
 			DateOfBirth:            dateOfBirth,
 			SalaryMin:              input.SalaryMin,
@@ -176,7 +177,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 	jobApplicationProfile.Zip = input.Zip
 	jobApplicationProfile.CountryOfResidence = input.CountryOfResidence
 	jobApplicationProfile.IsVeteran = input.IsVeteran
-	jobApplicationProfile.CountriesOfCitizenship = model.StringSlice(input.CountriesOfCitizenship)
+	jobApplicationProfile.CountriesOfCitizenship = pq.StringArray(input.CountriesOfCitizenship)
 	jobApplicationProfile.Gender = input.Gender
 	jobApplicationProfile.DateOfBirth = dateOfBirth
 	jobApplicationProfile.SalaryMin = input.SalaryMin
@@ -318,7 +319,7 @@ func buildProfileUpdateMap(input PatchJobApplicationProfileRequest) map[string]i
 		updates["is_veteran"] = *input.IsVeteran
 	}
 	if input.CountriesOfCitizenship != nil {
-		updates["countries_of_citizenship"] = model.StringSlice(*input.CountriesOfCitizenship)
+		updates["countries_of_citizenship"] = pq.StringArray(*input.CountriesOfCitizenship)
 	}
 	if input.Gender != nil {
 		updates["gender"] = *input.Gender

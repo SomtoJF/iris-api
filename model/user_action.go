@@ -4,6 +4,8 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type UserActionType string
@@ -69,10 +71,11 @@ func (u UserActionLayout) Value() (driver.Value, error) {
 
 type UserAction struct {
 	IdUserAction     uint             `gorm:"primaryKey;autoIncrement;column:id_user_action" json:"_"`
-	IdUser           uint             `gorm:"column:id_user;not null"`
-	User             User             `gorm:"foreignKey:IdUser;references:IdUser"`
-	IdJobApplication uint             `gorm:"column:id_job_application;not null"`
-	JobApplication   JobApplication   `gorm:"foreignKey:IdJobApplication;references:IdJobApplication"`
+	IdExternal       uuid.UUID        `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
+	UserId           uint             `gorm:"column:id_user;not null"`
+	User             User             `gorm:"foreignKey:UserId;references:IdUser"`
+	JobApplicationId uint             `gorm:"column:id_job_application;not null"`
+	JobApplication   JobApplication   `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
 	UserActionType   UserActionType   `gorm:"type:text;not null"`
 	ActionDetails    string           `gorm:"type:text;not null"`
 	UserActionLayout UserActionLayout `gorm:"type:jsonb;not null"`

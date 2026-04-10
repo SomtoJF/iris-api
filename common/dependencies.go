@@ -58,7 +58,7 @@ func MakeDependencies() (Dependencies, error) {
 		return nil, err
 	}
 
-	db, err := sqldb.ConnectToSQLite()
+	db, err := sqldb.ConnectToPostgres()
 	if err != nil {
 		return nil, err
 	}

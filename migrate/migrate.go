@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 
+	"github.com/SomtoJF/iris-api/initializers/env"
 	"github.com/SomtoJF/iris-api/initializers/sqldb"
 	"github.com/SomtoJF/iris-api/model"
 	"gorm.io/gorm"
@@ -12,35 +13,70 @@ var db *gorm.DB
 
 func init() {
 	var err error
-	db, err = sqldb.ConnectToSQLite()
+
+	err = env.LoadEnvVariables()
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	db, err = sqldb.ConnectToPostgres()
+	if err != nil {
+		log.Fatal(err)
+	}
+
 }
 
 func main() {
-	// if err := db.AutoMigrate(&model.User{}); err != nil {
-	// 	log.Fatal(err)
-	// }
+	// dropAllApplicationTables()
 
-	// if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
-	// 	log.Fatal(err)
-	// }
+	log.Println("Starting migration on table user")
+	if err := db.AutoMigrate(&model.User{}); err != nil {
+		log.Fatal(err)
+	}
 
-	// if err := db.AutoMigrate(&model.Resume{}); err != nil {
-	// 	log.Fatal(err)
-	// }
+	log.Println("Starting migration on table job application")
+	if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
+		log.Fatal(err)
+	}
 
-	// if err := db.AutoMigrate(&model.UserAction{}); err != nil {
-	// 	log.Fatal(err)
-	// }
+	log.Println("Starting migration on table resume")
+	if err := db.AutoMigrate(&model.Resume{}); err != nil {
+		log.Fatal(err)
+	}
 
+	log.Println("Starting migration on table user action")
+	if err := db.AutoMigrate(&model.UserAction{}); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("Starting migration on table job application profile")
 	if err := db.AutoMigrate(&model.JobApplicationProfile{}); err != nil {
 		log.Fatal(err)
 	}
 
+	log.Println("Starting migration on table cost tracking")
 	if err := db.AutoMigrate(&model.CostTracking{}); err != nil {
 		log.Fatal(err)
 	}
+
 	log.Println("Migration completed")
+}
+
+// dropAllApplicationTables removes Iris models' tables so AutoMigrate starts from a clean slate.
+// Tables are dropped in FK dependency order (children before user).
+func dropAllApplicationTables() {
+	log.Println("Dropping existing application tables (if any)")
+	tables := []interface{}{
+		&model.CostTracking{},
+		&model.UserAction{},
+		&model.Resume{},
+		&model.JobApplication{},
+		&model.JobApplicationProfile{},
+		&model.User{},
+	}
+	for _, t := range tables {
+		if err := db.Migrator().DropTable(t); err != nil {
+			log.Fatalf("drop table: %v", err)
+		}
+	}
 }

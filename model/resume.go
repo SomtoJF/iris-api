@@ -4,12 +4,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 type Resume struct {
 	IdResume   uint      `gorm:"primaryKey;autoIncrement;column:id_resume" json:"_"`
-	IdExternal uuid.UUID `gorm:"type:text;not null;unique" json:"id"`
+	IdExternal uuid.UUID `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
 	// Either url of filepath
 	UserId       uint       `gorm:"column:id_user;not null"`
 	User         User       `gorm:"foreignKey:UserId;references:IdUser"`
@@ -26,12 +25,4 @@ type Resume struct {
 
 func (Resume) TableName() string {
 	return "resume"
-}
-
-// BeforeCreate hook to auto-generate UUID
-func (r *Resume) BeforeCreate(tx *gorm.DB) error {
-	if r.IdExternal == uuid.Nil {
-		r.IdExternal = uuid.New()
-	}
-	return nil
 }
