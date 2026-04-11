@@ -46,7 +46,7 @@ func main() {
 	environment := os.Getenv("ENVIRONMENT")
 	var allowedOrigins []string
 	if environment == "production" {
-		allowedOrigins = []string{"https://iris.somtochukwu.com"}
+		allowedOrigins = []string{"https://app.applywithiris.com"}
 	} else {
 		allowedOrigins = []string{"http://localhost:5173"}
 	}
