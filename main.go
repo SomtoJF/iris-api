@@ -43,8 +43,16 @@ func main() {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
 
+	environment := os.Getenv("ENVIRONMENT")
+	var allowedOrigins []string
+	if environment == "production" {
+		allowedOrigins = []string{"https://iris.somtochukwu.com"}
+	} else {
+		allowedOrigins = []string{"http://localhost:5173"}
+	}
+
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowOrigins:     allowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
 		AllowCredentials: true,
