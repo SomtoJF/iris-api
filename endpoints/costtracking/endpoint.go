@@ -1,11 +1,13 @@
 package costtracking
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/SomtoJF/iris-api/model"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -59,6 +61,32 @@ type getCostTrackingRequest struct {
 	JobApplicationID string `form:"job_application_id"`
 }
 
+type costTrackingFilters struct {
+	userID           *uint
+	jobApplicationID *uint
+}
+
+func emptyCostTrackingList(req getCostTrackingRequest) GetCostTrackingResponse {
+	return GetCostTrackingResponse{
+		Data:                 []CostTracking{},
+		TotalAccumulatedCost: 0,
+		Total:                0,
+		Page:                 req.Page,
+		Limit:                req.Limit,
+	}
+}
+
+func (e *Endpoint) costTrackingQuery(f costTrackingFilters) *gorm.DB {
+	q := e.db.Model(&model.CostTracking{})
+	if f.userID != nil {
+		q = q.Where("cost_tracking.id_user = ?", *f.userID)
+	}
+	if f.jobApplicationID != nil {
+		q = q.Where("cost_tracking.id_job_application = ?", *f.jobApplicationID)
+	}
+	return q
+}
+
 func (e *Endpoint) GetCostTracking(c *gin.Context) {
 	currentUser, ok := c.Value("currentUser").(model.User)
 	if !ok || !currentUser.IsAdmin {
@@ -72,28 +100,60 @@ func (e *Endpoint) GetCostTracking(c *gin.Context) {
 		return
 	}
 
-	query := e.db.Model(&model.CostTracking{})
-
-	if req.UserID != "" {
-		query = query.Joins("JOIN users ON users.id_user = cost_tracking.id_user").
-			Where("users.id_external = ?", req.UserID)
-	}
+	filters := costTrackingFilters{}
 	if req.JobApplicationID != "" {
-		query = query.Joins("JOIN job_applications ON job_applications.id_job_application = cost_tracking.id_job_application").
-			Where("job_applications.id_external = ?", req.JobApplicationID)
+		jobUUID, err := uuid.Parse(req.JobApplicationID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid job_application_id"})
+			return
+		}
+		var job model.JobApplication
+		if err := e.db.Where("id_external = ?", jobUUID).First(&job).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusOK, emptyCostTrackingList(req))
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve job application"})
+			return
+		}
+		id := job.IdJobApplication
+		filters.jobApplicationID = &id
+	}
+	if req.UserID != "" {
+		userUUID, err := uuid.Parse(req.UserID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid user_id"})
+			return
+		}
+		var u model.User
+		if err := e.db.Where("id_external = ?", userUUID).First(&u).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusOK, emptyCostTrackingList(req))
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to resolve user"})
+			return
+		}
+		id := u.IdUser
+		filters.userID = &id
 	}
 
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := e.costTrackingQuery(filters).Count(&total).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count records"})
 		return
 	}
 
 	var totalAccumulatedCost float64
-	query.Select("COALESCE(SUM(total_cost), 0)").Row().Scan(&totalAccumulatedCost)
+	if err := e.costTrackingQuery(filters).
+		Select("COALESCE(SUM(cost_tracking.total_cost), 0)").
+		Scan(&totalAccumulatedCost).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to sum costs"})
+		return
+	}
 
 	var records []model.CostTracking
-	err := query.Select("*").
+	err := e.costTrackingQuery(filters).
 		Preload("User").
 		Preload("JobApplication").
 		Order("cost_tracking.created_at DESC").
