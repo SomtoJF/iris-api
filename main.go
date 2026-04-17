@@ -10,6 +10,7 @@ import (
 	"github.com/SomtoJF/iris-api/endpoints/health"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplication"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplicationprofile"
+	"github.com/SomtoJF/iris-api/endpoints/jobsearch"
 	realtimeeventsse "github.com/SomtoJF/iris-api/endpoints/realtimeeventssse"
 	"github.com/SomtoJF/iris-api/endpoints/resume"
 	workflowendpoint "github.com/SomtoJF/iris-api/endpoints/workflow"
@@ -39,6 +40,7 @@ func main() {
 	s3Manager := dependencies.GetS3Manager()
 	logger := log.Default()
 	redisPubSub := dependencies.GetRedisPubSub()
+	redisClient := dependencies.GetRedisClient()
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
@@ -69,6 +71,7 @@ func main() {
 	authEndpoint := auth.NewEndpoint(db, os.Getenv("CLIENT_DOMAIN"))
 	healthEndpoint := health.NewEndpoint()
 	jobEndpoint := jobapplication.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
+	jobSearchEndpoint := jobsearch.NewEndpoint(db, temporalClient, redisClient, logger, temporal.JobApplicationTaskQueueName)
 	realtimeEventsEndpoint := realtimeeventsse.NewEndpoint(redisPubSub, logger)
 	resumeEndpoint := resume.NewEndpoint(db, s3Manager, logger, temporalClient, temporal.JobApplicationTaskQueueName)
 	jobApplicationProfileEndpoint := jobapplicationprofile.NewEndpoint(db, logger)
@@ -99,6 +102,8 @@ func main() {
 		protected.POST("/jobs/:id/retry-application", jobEndpoint.RetryApplication)
 		protected.GET("/jobs/:id/user-action", jobEndpoint.GetUserAction)
 		protected.GET("/jobs", jobEndpoint.FetchAllJobApplications)
+		protected.GET("/jobs/search/history", jobSearchEndpoint.GetJobSearchHistory)
+		protected.POST("/jobs/search", jobSearchEndpoint.TriggerJobSearch)
 
 		protected.GET("/realtime/events", realtimeEventsEndpoint.StreamEvents)
 

@@ -8,6 +8,7 @@ import (
 	"github.com/SomtoJF/iris-api/initializers/sqldb"
 	redispubsub "github.com/SomtoJF/iris-api/pkg/redis"
 	s3pkg "github.com/SomtoJF/iris-api/pkg/s3"
+	"github.com/redis/go-redis/v9"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
 )
@@ -16,6 +17,7 @@ type Dependencies interface {
 	GetDB() *gorm.DB
 	GetTemporalClient() client.Client
 	GetRedisPubSub() *redispubsub.RedisPubSub
+	GetRedisClient() *redis.Client
 	GetS3Manager() *s3pkg.S3Manager
 	Cleanup()
 }
@@ -24,6 +26,7 @@ type dependencies struct {
 	db             *gorm.DB
 	temporalClient client.Client
 	redisPubSub    *redispubsub.RedisPubSub
+	redisClient    *redis.Client
 	s3Manager      *s3pkg.S3Manager
 }
 
@@ -37,6 +40,10 @@ func (d *dependencies) GetTemporalClient() client.Client {
 
 func (d *dependencies) GetRedisPubSub() *redispubsub.RedisPubSub {
 	return d.redisPubSub
+}
+
+func (d *dependencies) GetRedisClient() *redis.Client {
+	return d.redisClient
 }
 
 func (d *dependencies) GetS3Manager() *s3pkg.S3Manager {
@@ -91,6 +98,7 @@ func MakeDependencies() (Dependencies, error) {
 		db:             db,
 		temporalClient: temporalClient,
 		redisPubSub:    redisPubSub,
+		redisClient:    rdb,
 		s3Manager:      s3Manager,
 	}, nil
 }
