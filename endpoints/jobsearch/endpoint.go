@@ -65,18 +65,44 @@ type RedisJobSearchPayload struct {
 	CurrentUsage int             `json:"current_usage"`
 }
 
-type TriggerJobSearchRequest struct {
-	SearchQuery string `json:"search_query" binding:"required"`
+// triggerJobSearchJSON is the HTTP request body (camelCase JSON).
+type triggerJobSearchRequest struct {
+	SearchQuery string `json:"searchQuery" binding:"required"`
 	Location    string `json:"location" binding:"required"`
-	DateCutoff  string `json:"date_cutoff" binding:"required"`
+	DateCutoff  string `json:"dateCutoff" binding:"required"`
 }
 
-// JobSearchHistoryEntry is one recorded search request (no job results).
-type JobSearchHistoryEntry struct {
-	SearchQuery string    `json:"search_query"`
+// jobSearchResponseJSON is the HTTP response for POST /jobs/search (camelCase JSON).
+type jobSearchResponse struct {
+	Jobs []discoveredJobJSON `json:"jobs"`
+}
+
+type discoveredJobJSON struct {
+	Title       string `json:"title"`
+	Url         string `json:"url"`
+	CompanyName string `json:"companyName"`
+	DatePosted  string `json:"datePosted"`
+}
+
+// JobSearchHistoryEntryJSON is one history row for API and Redis list v2 (camelCase JSON).
+type JobSearchHistoryEntryJSON struct {
+	SearchQuery string    `json:"searchQuery"`
 	Location    string    `json:"location"`
-	DateCutoff  string    `json:"date_cutoff"`
-	RequestedAt time.Time `json:"requested_at"`
+	DateCutoff  string    `json:"dateCutoff"`
+	RequestedAt time.Time `json:"requestedAt"`
+}
+
+func jobDiscoveryOutputToResponse(out JobDiscoveryWorkflowOutput) jobSearchResponse {
+	jobs := make([]discoveredJobJSON, 0, len(out.Jobs))
+	for _, j := range out.Jobs {
+		jobs = append(jobs, discoveredJobJSON{
+			Title:       j.Title,
+			Url:         j.Url,
+			CompanyName: j.CompanyName,
+			DatePosted:  j.DatePosted,
+		})
+	}
+	return jobSearchResponse{Jobs: jobs}
 }
 
 func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
@@ -86,17 +112,21 @@ func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 		return
 	}
 
-	var request TriggerJobSearchRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
+	var body triggerJobSearchRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
 		e.logger.Printf("Failed to bind job search request: %v", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	cacheKey := jobSearchCacheKey(userId, request.SearchQuery, request.Location, request.DateCutoff)
+	searchQuery := body.SearchQuery
+	location := body.Location
+	dateCutoff := body.DateCutoff
+
+	cacheKey := jobSearchCacheKey(userId, searchQuery, location, dateCutoff)
 	if cached, ok := e.tryGetJobSearchFromCache(c.Request.Context(), cacheKey); ok {
-		e.appendJobSearchHistory(c.Request.Context(), userId, request)
-		c.JSON(http.StatusOK, cached)
+		// e.appendJobSearchHistory(c.Request.Context(), userId, searchQuery, location, dateCutoff)
+		c.JSON(http.StatusOK, jobDiscoveryOutputToResponse(cached))
 		return
 	}
 
@@ -109,9 +139,9 @@ func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 
 	workflowInput := JobDiscoveryWorkflowInput{
 		IdUser:      userId,
-		SearchQuery: request.SearchQuery,
-		Location:    request.Location,
-		DateCutoff:  request.DateCutoff,
+		SearchQuery: searchQuery,
+		Location:    location,
+		DateCutoff:  dateCutoff,
 	}
 	workflowRun, err := e.temporalClient.ExecuteWorkflow(c.Request.Context(), workflowOptions, "JobDiscoveryWorkflow", workflowInput)
 	if err != nil {
@@ -128,9 +158,9 @@ func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 	}
 
 	e.setJobSearchCache(c.Request.Context(), cacheKey, output)
-	e.appendJobSearchHistory(c.Request.Context(), userId, request)
+	e.appendJobSearchHistory(c.Request.Context(), userId, searchQuery, location, dateCutoff)
 
-	c.JSON(http.StatusOK, output)
+	c.JSON(http.StatusOK, jobDiscoveryOutputToResponse(output))
 }
 
 func (e *Endpoint) GetJobSearchHistory(c *gin.Context) {
@@ -140,7 +170,7 @@ func (e *Endpoint) GetJobSearchHistory(c *gin.Context) {
 		return
 	}
 	entries := e.listJobSearchHistory(c.Request.Context(), userId)
-	c.JSON(http.StatusOK, gin.H{"data": entries})
+	c.JSON(http.StatusOK, gin.H{"data": entries}) // []JobSearchHistoryEntryJSON
 }
 
 // tryGetJobSearchFromCache returns (output, true) on a cache hit. On miss, corrupt
@@ -179,18 +209,18 @@ func (e *Endpoint) setJobSearchCache(ctx context.Context, cacheKey string, outpu
 }
 
 func jobSearchHistoryKey(userId uint) string {
-	return fmt.Sprintf("%shistory:v1:%d", REDIS_JOB_SEARCH_KEY_PREFIX, userId)
+	return fmt.Sprintf("%shistory:v2:%d", REDIS_JOB_SEARCH_KEY_PREFIX, userId)
 }
 
 // appendJobSearchHistory records a successful search request (LPUSH: newest first). Fail-open.
-func (e *Endpoint) appendJobSearchHistory(ctx context.Context, userId uint, req TriggerJobSearchRequest) {
+func (e *Endpoint) appendJobSearchHistory(ctx context.Context, userId uint, searchQuery, location, dateCutoff string) {
 	if e.redis == nil {
 		return
 	}
-	entry := JobSearchHistoryEntry{
-		SearchQuery: req.SearchQuery,
-		Location:    req.Location,
-		DateCutoff:  req.DateCutoff,
+	entry := JobSearchHistoryEntryJSON{
+		SearchQuery: searchQuery,
+		Location:    location,
+		DateCutoff:  dateCutoff,
 		RequestedAt: time.Now().UTC(),
 	}
 	payload, err := json.Marshal(entry)
@@ -212,8 +242,8 @@ func (e *Endpoint) appendJobSearchHistory(ctx context.Context, userId uint, req 
 }
 
 // listJobSearchHistory returns history newest-first (Redis LPUSH order). On errors or corrupt elements, logs and fail-open (partial or empty slice).
-func (e *Endpoint) listJobSearchHistory(ctx context.Context, userId uint) []JobSearchHistoryEntry {
-	out := make([]JobSearchHistoryEntry, 0)
+func (e *Endpoint) listJobSearchHistory(ctx context.Context, userId uint) []JobSearchHistoryEntryJSON {
+	out := make([]JobSearchHistoryEntryJSON, 0)
 	if e.redis == nil {
 		return out
 	}
@@ -223,9 +253,9 @@ func (e *Endpoint) listJobSearchHistory(ctx context.Context, userId uint) []JobS
 		e.logger.Printf("job search history: redis LRANGE failed: %v", err)
 		return out
 	}
-	out = make([]JobSearchHistoryEntry, 0, len(raw))
+	out = make([]JobSearchHistoryEntryJSON, 0, len(raw))
 	for i, s := range raw {
-		var entry JobSearchHistoryEntry
+		var entry JobSearchHistoryEntryJSON
 		if err := json.Unmarshal([]byte(s), &entry); err != nil {
 			e.logger.Printf("job search history: corrupt list element at index %d: %v", i, err)
 			continue
