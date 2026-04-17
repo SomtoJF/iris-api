@@ -1,4 +1,4 @@
-package job
+package jobapplication
 
 import (
 	"context"
@@ -220,12 +220,12 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 }
 
 type UserActionResponse struct {
-	ID             uint                       `json:"id"`
-	UserActionType model.UserActionType       `json:"user_action_type"`
-	ActionDetails  string                     `json:"action_details"`
-	Layout         model.UserActionLayout     `json:"layout"`
-	WorkflowID     string                     `json:"workflow_id"`
-	SignalName     string                     `json:"signal_name"`
+	ID             uint                   `json:"id"`
+	UserActionType model.UserActionType   `json:"user_action_type"`
+	ActionDetails  string                 `json:"action_details"`
+	Layout         model.UserActionLayout `json:"layout"`
+	WorkflowID     string                 `json:"workflow_id"`
+	SignalName     string                 `json:"signal_name"`
 }
 
 func (e *Endpoint) GetUserAction(c *gin.Context) {
