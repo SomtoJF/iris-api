@@ -34,32 +34,42 @@ type UpsertJobApplicationProfileRequest struct {
 	CountriesOfCitizenship []string `json:"countriesOfCitizenship" binding:"required"`
 	Gender                 string   `json:"gender" binding:"required"`
 	// Date of birth in ISO 8601 format
-	DateOfBirth    string   `json:"dateOfBirth" binding:"required"`
-	SalaryMin      *float64 `json:"salaryMin"`
-	SalaryMax      *float64 `json:"salaryMax"`
-	SalaryCurrency string   `json:"salaryCurrency"`
-	Ethnicity      string   `json:"ethnicity"`
+	DateOfBirth                 string                      `json:"dateOfBirth" binding:"required"`
+	SalaryMin                   *float64                    `json:"salaryMin"`
+	SalaryMax                   *float64                    `json:"salaryMax"`
+	SalaryCurrency              string                      `json:"salaryCurrency"`
+	Ethnicity                   string                      `json:"ethnicity"`
+	IsOpenToRelocating          *bool                       `json:"isOpenToRelocating"`
+	NoticePeriodDays            *int                        `json:"noticePeriodDays"`
+	PreferredWorkingArrangement []string                    `json:"preferredWorkingArrangement"`
+	LanguageProficiencies       model.LanguageProficiencies `json:"languageProficiencies"`
+	PortfolioLink               *string                     `json:"portfolioLink"`
 }
 
 type GetJobApplicationProfileResponse struct {
-	Id                     string   `json:"id"`
-	FirstName              string   `json:"firstName"`
-	LastName               string   `json:"lastName"`
-	Email                  string   `json:"email"`
-	Phone                  string   `json:"phone"`
-	Address                string   `json:"address"`
-	City                   string   `json:"city"`
-	State                  string   `json:"state"`
-	Zip                    string   `json:"zip"`
-	CountryOfResidence     string   `json:"countryOfResidence"`
-	IsVeteran              bool     `json:"isVeteran"`
-	CountriesOfCitizenship []string `json:"countriesOfCitizenship"`
-	Gender                 string   `json:"gender"`
-	DateOfBirth            string   `json:"dateOfBirth"`
-	SalaryMin              *float64 `json:"salaryMin"`
-	SalaryMax              *float64 `json:"salaryMax"`
-	SalaryCurrency         string   `json:"salaryCurrency"`
-	Ethnicity              string   `json:"ethnicity"`
+	Id                          string                      `json:"id"`
+	FirstName                   string                      `json:"firstName"`
+	LastName                    string                      `json:"lastName"`
+	Email                       string                      `json:"email"`
+	Phone                       string                      `json:"phone"`
+	Address                     string                      `json:"address"`
+	City                        string                      `json:"city"`
+	State                       string                      `json:"state"`
+	Zip                         string                      `json:"zip"`
+	CountryOfResidence          string                      `json:"countryOfResidence"`
+	IsVeteran                   bool                        `json:"isVeteran"`
+	CountriesOfCitizenship      []string                    `json:"countriesOfCitizenship"`
+	Gender                      string                      `json:"gender"`
+	DateOfBirth                 string                      `json:"dateOfBirth"`
+	SalaryMin                   *float64                    `json:"salaryMin"`
+	SalaryMax                   *float64                    `json:"salaryMax"`
+	SalaryCurrency              string                      `json:"salaryCurrency"`
+	Ethnicity                   string                      `json:"ethnicity"`
+	IsOpenToRelocating          *bool                       `json:"isOpenToRelocating"`
+	NoticePeriodDays            *int                        `json:"noticePeriodDays"`
+	PreferredWorkingArrangement []string                    `json:"preferredWorkingArrangement"`
+	LanguageProficiencies       model.LanguageProficiencies `json:"languageProficiencies"`
+	PortfolioLink               *string                     `json:"portfolioLink"`
 }
 
 // get /jobapplicationprofile
@@ -79,24 +89,29 @@ func (e *Endpoint) GetJobApplicationProfile(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": GetJobApplicationProfileResponse{
-		Id:                     jobApplicationProfile.IdExternal.String(),
-		FirstName:              jobApplicationProfile.FirstName,
-		LastName:               jobApplicationProfile.LastName,
-		Email:                  jobApplicationProfile.Email,
-		Phone:                  jobApplicationProfile.Phone,
-		Address:                jobApplicationProfile.Address,
-		City:                   jobApplicationProfile.City,
-		State:                  jobApplicationProfile.State,
-		Zip:                    jobApplicationProfile.Zip,
-		CountryOfResidence:     jobApplicationProfile.CountryOfResidence,
-		IsVeteran:              jobApplicationProfile.IsVeteran,
-		CountriesOfCitizenship: []string(jobApplicationProfile.CountriesOfCitizenship),
-		Gender:                 jobApplicationProfile.Gender,
-		DateOfBirth:            jobApplicationProfile.DateOfBirth.Format(time.RFC3339),
-		SalaryMin:              jobApplicationProfile.SalaryMin,
-		SalaryMax:              jobApplicationProfile.SalaryMax,
-		SalaryCurrency:         jobApplicationProfile.SalaryCurrency,
-		Ethnicity:              jobApplicationProfile.Ethnicity,
+		Id:                          jobApplicationProfile.IdExternal.String(),
+		FirstName:                   jobApplicationProfile.FirstName,
+		LastName:                    jobApplicationProfile.LastName,
+		Email:                       jobApplicationProfile.Email,
+		Phone:                       jobApplicationProfile.Phone,
+		Address:                     jobApplicationProfile.Address,
+		City:                        jobApplicationProfile.City,
+		State:                       jobApplicationProfile.State,
+		Zip:                         jobApplicationProfile.Zip,
+		CountryOfResidence:          jobApplicationProfile.CountryOfResidence,
+		IsVeteran:                   jobApplicationProfile.IsVeteran,
+		CountriesOfCitizenship:      []string(jobApplicationProfile.CountriesOfCitizenship),
+		Gender:                      jobApplicationProfile.Gender,
+		DateOfBirth:                 jobApplicationProfile.DateOfBirth.Format(time.RFC3339),
+		SalaryMin:                   jobApplicationProfile.SalaryMin,
+		SalaryMax:                   jobApplicationProfile.SalaryMax,
+		SalaryCurrency:              jobApplicationProfile.SalaryCurrency,
+		Ethnicity:                   jobApplicationProfile.Ethnicity,
+		IsOpenToRelocating:          jobApplicationProfile.IsOpenToRelocating,
+		NoticePeriodDays:            jobApplicationProfile.NoticePeriodDays,
+		PreferredWorkingArrangement: []string(jobApplicationProfile.PreferredWorkingArrangement),
+		LanguageProficiencies:       jobApplicationProfile.LanguageProficiencies,
+		PortfolioLink:               jobApplicationProfile.PortfolioLink,
 	}})
 }
 
@@ -136,24 +151,29 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 
 	if err == gorm.ErrRecordNotFound {
 		jobApplicationProfile = model.JobApplicationProfile{
-			UserId:                 userId,
-			FirstName:              input.FirstName,
-			LastName:               input.LastName,
-			Email:                  input.Email,
-			Phone:                  input.Phone,
-			Address:                input.Address,
-			City:                   input.City,
-			State:                  input.State,
-			Zip:                    input.Zip,
-			CountryOfResidence:     input.CountryOfResidence,
-			IsVeteran:              input.IsVeteran,
-			CountriesOfCitizenship: pq.StringArray(input.CountriesOfCitizenship),
-			Gender:                 input.Gender,
-			DateOfBirth:            dateOfBirth,
-			SalaryMin:              input.SalaryMin,
-			SalaryMax:              input.SalaryMax,
-			SalaryCurrency:         input.SalaryCurrency,
-			Ethnicity:              input.Ethnicity,
+			UserId:                      userId,
+			FirstName:                   input.FirstName,
+			LastName:                    input.LastName,
+			Email:                       input.Email,
+			Phone:                       input.Phone,
+			Address:                     input.Address,
+			City:                        input.City,
+			State:                       input.State,
+			Zip:                         input.Zip,
+			CountryOfResidence:          input.CountryOfResidence,
+			IsVeteran:                   input.IsVeteran,
+			CountriesOfCitizenship:      pq.StringArray(input.CountriesOfCitizenship),
+			Gender:                      input.Gender,
+			DateOfBirth:                 dateOfBirth,
+			SalaryMin:                   input.SalaryMin,
+			SalaryMax:                   input.SalaryMax,
+			SalaryCurrency:              input.SalaryCurrency,
+			Ethnicity:                   input.Ethnicity,
+			IsOpenToRelocating:          input.IsOpenToRelocating,
+			NoticePeriodDays:            input.NoticePeriodDays,
+			PreferredWorkingArrangement: pq.StringArray(input.PreferredWorkingArrangement),
+			LanguageProficiencies:       input.LanguageProficiencies,
+			PortfolioLink:               input.PortfolioLink,
 		}
 		if err := e.db.Create(&jobApplicationProfile).Error; err != nil {
 			e.logger.Printf("Failed to create job application profile: %v", err)
@@ -184,6 +204,11 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 	jobApplicationProfile.SalaryMax = input.SalaryMax
 	jobApplicationProfile.SalaryCurrency = input.SalaryCurrency
 	jobApplicationProfile.Ethnicity = input.Ethnicity
+	jobApplicationProfile.IsOpenToRelocating = input.IsOpenToRelocating
+	jobApplicationProfile.NoticePeriodDays = input.NoticePeriodDays
+	jobApplicationProfile.PreferredWorkingArrangement = pq.StringArray(input.PreferredWorkingArrangement)
+	jobApplicationProfile.LanguageProficiencies = input.LanguageProficiencies
+	jobApplicationProfile.PortfolioLink = input.PortfolioLink
 
 	if err := e.db.Save(&jobApplicationProfile).Error; err != nil {
 		e.logger.Printf("Failed to update job application profile: %v", err)
@@ -198,23 +223,28 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 }
 
 type PatchJobApplicationProfileRequest struct {
-	FirstName              *string   `json:"firstName"`
-	LastName               *string   `json:"lastName"`
-	Email                  *string   `json:"email"`
-	Phone                  *string   `json:"phone"`
-	Address                *string   `json:"address"`
-	City                   *string   `json:"city"`
-	State                  *string   `json:"state"`
-	Zip                    *string   `json:"zip"`
-	CountryOfResidence     *string   `json:"countryOfResidence"`
-	IsVeteran              *bool     `json:"isVeteran"`
-	CountriesOfCitizenship *[]string `json:"countriesOfCitizenship"`
-	Gender                 *string   `json:"gender"`
-	DateOfBirth            *string   `json:"dateOfBirth"`
-	SalaryMin              *float64  `json:"salaryMin"`
-	SalaryMax              *float64  `json:"salaryMax"`
-	SalaryCurrency         *string   `json:"salaryCurrency"`
-	Ethnicity              *string   `json:"ethnicity"`
+	FirstName                   *string                      `json:"firstName"`
+	LastName                    *string                      `json:"lastName"`
+	Email                       *string                      `json:"email"`
+	Phone                       *string                      `json:"phone"`
+	Address                     *string                      `json:"address"`
+	City                        *string                      `json:"city"`
+	State                       *string                      `json:"state"`
+	Zip                         *string                      `json:"zip"`
+	CountryOfResidence          *string                      `json:"countryOfResidence"`
+	IsVeteran                   *bool                        `json:"isVeteran"`
+	CountriesOfCitizenship      *[]string                    `json:"countriesOfCitizenship"`
+	Gender                      *string                      `json:"gender"`
+	DateOfBirth                 *string                      `json:"dateOfBirth"`
+	SalaryMin                   *float64                     `json:"salaryMin"`
+	SalaryMax                   *float64                     `json:"salaryMax"`
+	SalaryCurrency              *string                      `json:"salaryCurrency"`
+	Ethnicity                   *string                      `json:"ethnicity"`
+	IsOpenToRelocating          *bool                        `json:"isOpenToRelocating"`
+	NoticePeriodDays            *int                         `json:"noticePeriodDays"`
+	PreferredWorkingArrangement *[]string                    `json:"preferredWorkingArrangement"`
+	LanguageProficiencies       *model.LanguageProficiencies `json:"languageProficiencies"`
+	PortfolioLink               *string                      `json:"portfolioLink"`
 }
 
 // patch /jobapplicationprofile
@@ -264,24 +294,29 @@ func (e *Endpoint) PatchJobApplicationProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Job application profile updated successfully",
 		"data": GetJobApplicationProfileResponse{
-			Id:                     profile.IdExternal.String(),
-			FirstName:              profile.FirstName,
-			LastName:               profile.LastName,
-			Email:                  profile.Email,
-			Phone:                  profile.Phone,
-			Address:                profile.Address,
-			City:                   profile.City,
-			State:                  profile.State,
-			Zip:                    profile.Zip,
-			CountryOfResidence:     profile.CountryOfResidence,
-			IsVeteran:              profile.IsVeteran,
-			CountriesOfCitizenship: []string(profile.CountriesOfCitizenship),
-			Gender:                 profile.Gender,
-			DateOfBirth:            profile.DateOfBirth.Format(time.RFC3339),
-			SalaryMin:              profile.SalaryMin,
-			SalaryMax:              profile.SalaryMax,
-			SalaryCurrency:         profile.SalaryCurrency,
-			Ethnicity:              profile.Ethnicity,
+			Id:                          profile.IdExternal.String(),
+			FirstName:                   profile.FirstName,
+			LastName:                    profile.LastName,
+			Email:                       profile.Email,
+			Phone:                       profile.Phone,
+			Address:                     profile.Address,
+			City:                        profile.City,
+			State:                       profile.State,
+			Zip:                         profile.Zip,
+			CountryOfResidence:          profile.CountryOfResidence,
+			IsVeteran:                   profile.IsVeteran,
+			CountriesOfCitizenship:      []string(profile.CountriesOfCitizenship),
+			Gender:                      profile.Gender,
+			DateOfBirth:                 profile.DateOfBirth.Format(time.RFC3339),
+			SalaryMin:                   profile.SalaryMin,
+			SalaryMax:                   profile.SalaryMax,
+			SalaryCurrency:              profile.SalaryCurrency,
+			Ethnicity:                   profile.Ethnicity,
+			IsOpenToRelocating:          profile.IsOpenToRelocating,
+			NoticePeriodDays:            profile.NoticePeriodDays,
+			PreferredWorkingArrangement: []string(profile.PreferredWorkingArrangement),
+			LanguageProficiencies:       profile.LanguageProficiencies,
+			PortfolioLink:               profile.PortfolioLink,
 		},
 	})
 }
@@ -335,6 +370,21 @@ func buildProfileUpdateMap(input PatchJobApplicationProfileRequest) map[string]i
 	}
 	if input.Ethnicity != nil {
 		updates["ethnicity"] = *input.Ethnicity
+	}
+	if input.IsOpenToRelocating != nil {
+		updates["is_open_to_relocating"] = *input.IsOpenToRelocating
+	}
+	if input.NoticePeriodDays != nil {
+		updates["notice_period_days"] = *input.NoticePeriodDays
+	}
+	if input.PreferredWorkingArrangement != nil {
+		updates["preferred_working_arrangement"] = pq.StringArray(*input.PreferredWorkingArrangement)
+	}
+	if input.LanguageProficiencies != nil {
+		updates["language_proficiencies"] = *input.LanguageProficiencies
+	}
+	if input.PortfolioLink != nil {
+		updates["portfolio_link"] = *input.PortfolioLink
 	}
 	return updates
 }

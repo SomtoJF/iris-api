@@ -325,12 +325,28 @@ func (e *Endpoint) isOnboardingComplete(userID uint) bool {
 		return false
 	}
 
-	fmt.Println(profile)
 	if profile.FirstName == "" || profile.LastName == "" || profile.Email == "" ||
 		profile.Phone == "" || profile.Address == "" || profile.City == "" ||
 		profile.State == "" || profile.Zip == "" || profile.CountryOfResidence == "" ||
 		profile.Gender == "" || profile.DateOfBirth.IsZero() ||
 		len(profile.CountriesOfCitizenship) == 0 {
+		return false
+	}
+
+	// Required onboarding fields (extra)
+	if profile.IsOpenToRelocating == nil || profile.NoticePeriodDays == nil ||
+		len(profile.PreferredWorkingArrangement) == 0 ||
+		len(profile.LanguageProficiencies) == 0 {
+		return false
+	}
+
+	for _, lp := range profile.LanguageProficiencies {
+		if lp.Language == "" || lp.Proficiency == "" {
+			return false
+		}
+	}
+
+	if *profile.NoticePeriodDays < 0 {
 		return false
 	}
 	return true
