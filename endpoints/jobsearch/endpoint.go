@@ -67,9 +67,9 @@ type RedisJobSearchPayload struct {
 
 // triggerJobSearchJSON is the HTTP request body (camelCase JSON).
 type triggerJobSearchRequest struct {
-	SearchQuery string `json:"searchQuery" binding:"required"`
-	Location    string `json:"location" binding:"required"`
-	DateCutoff  string `json:"dateCutoff" binding:"required"`
+	SearchQuery string  `json:"searchQuery" binding:"required"`
+	Location    string  `json:"location" binding:"required"`
+	DateCutoff  *string `json:"dateCutoff"`
 }
 
 // jobSearchResponseJSON is the HTTP response for POST /jobs/search (camelCase JSON).
@@ -121,11 +121,13 @@ func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 
 	searchQuery := body.SearchQuery
 	location := body.Location
-	dateCutoff := body.DateCutoff
+	dateCutoff := ""
+	if body.DateCutoff != nil {
+		dateCutoff = *body.DateCutoff
+	}
 
 	cacheKey := jobSearchCacheKey(userId, searchQuery, location, dateCutoff)
 	if cached, ok := e.tryGetJobSearchFromCache(c.Request.Context(), cacheKey); ok {
-		// e.appendJobSearchHistory(c.Request.Context(), userId, searchQuery, location, dateCutoff)
 		c.JSON(http.StatusOK, jobDiscoveryOutputToResponse(cached))
 		return
 	}
