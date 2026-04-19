@@ -29,30 +29,30 @@ func init() {
 func main() {
 	// dropAllApplicationTables()
 
-	log.Println("Starting migration on table user")
-	if err := db.AutoMigrate(&model.User{}); err != nil {
-		log.Fatal(err)
-	}
+	// log.Println("Starting migration on table user")
+	// if err := db.AutoMigrate(&model.User{}); err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	log.Println("Starting migration on table job application")
-	if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
-		log.Fatal(err)
-	}
+	// log.Println("Starting migration on table job application")
+	// if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	log.Println("Starting migration on table resume")
-	if err := db.AutoMigrate(&model.Resume{}); err != nil {
-		log.Fatal(err)
-	}
+	// log.Println("Starting migration on table resume")
+	// if err := db.AutoMigrate(&model.Resume{}); err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	log.Println("Starting migration on table user action")
-	if err := db.AutoMigrate(&model.UserAction{}); err != nil {
-		log.Fatal(err)
-	}
+	// log.Println("Starting migration on table user action")
+	// if err := db.AutoMigrate(&model.UserAction{}); err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	log.Println("Starting migration on table job application profile")
-	if err := db.AutoMigrate(&model.JobApplicationProfile{}); err != nil {
-		log.Fatal(err)
-	}
+	// log.Println("Starting migration on table job application profile")
+	// if err := db.AutoMigrate(&model.JobApplicationProfile{}); err != nil {
+	// 	log.Fatal(err)
+	// }
 
 	log.Println("Starting migration on table cost tracking")
 	if err := db.AutoMigrate(&model.CostTracking{}); err != nil {
