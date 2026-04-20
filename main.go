@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"log"
+	"log/slog"
 	"os"
 
 	"github.com/SomtoJF/iris-api/common"
@@ -20,6 +22,7 @@ import (
 	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/posthog/posthog-go"
 )
 
 func init() {
@@ -39,9 +42,20 @@ func main() {
 	db := dependencies.GetDB()
 	temporalClient := dependencies.GetTemporalClient()
 	s3Manager := dependencies.GetS3Manager()
-	logger := log.Default()
 	redisPubSub := dependencies.GetRedisPubSub()
 	redisClient := dependencies.GetRedisClient()
+	posthogClient := dependencies.GetPosthogClient()
+
+	baseHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})
+
+	logger := slog.New(posthog.NewSlogCaptureHandler(baseHandler, posthogClient,
+		posthog.WithDistinctIDFn(func(ctx context.Context, r slog.Record) string {
+			// Return the user ID from context or another source
+			return "user_distinct_id"
+		}),
+	))
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.Default()
@@ -69,7 +83,7 @@ func main() {
 		}
 	}()
 
-	authEndpoint := auth.NewEndpoint(db, os.Getenv("CLIENT_DOMAIN"))
+	authEndpoint := auth.NewEndpoint(db, os.Getenv("CLIENT_DOMAIN"), logger)
 	healthEndpoint := health.NewEndpoint()
 	jobEndpoint := jobapplication.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 	jobSearchEndpoint := jobsearch.NewEndpoint(db, temporalClient, redisClient, logger, temporal.JobApplicationTaskQueueName)

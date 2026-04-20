@@ -2,7 +2,7 @@ package workflow
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -11,10 +11,10 @@ import (
 
 type Endpoint struct {
 	temporalClient client.Client
-	logger         *log.Logger
+	logger         *slog.Logger
 }
 
-func NewEndpoint(temporalClient client.Client, logger *log.Logger) *Endpoint {
+func NewEndpoint(temporalClient client.Client, logger *slog.Logger) *Endpoint {
 	return &Endpoint{temporalClient: temporalClient, logger: logger}
 }
 
@@ -27,12 +27,14 @@ type SendSignalRequest struct {
 func (e *Endpoint) SendWorkflowSignal(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "SendWorkflowSignal")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var req SendSignalRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		e.logger.Warn("failed to bind JSON", "handler", "SendWorkflowSignal", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -45,7 +47,7 @@ func (e *Endpoint) SendWorkflowSignal(c *gin.Context) {
 		req.Payload,
 	)
 	if err != nil {
-		e.logger.Printf("Failed to signal workflow %s: %v", req.WorkflowID, err)
+		e.logger.Error("failed to signal workflow", "workflow_id", req.WorkflowID, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to signal workflow"})
 		return
 	}

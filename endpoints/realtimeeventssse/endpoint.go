@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -15,10 +15,10 @@ import (
 
 type Endpoint struct {
 	redisPubSub *redispubsub.RedisPubSub
-	logger      *log.Logger
+	logger      *slog.Logger
 }
 
-func NewEndpoint(redisPubSub *redispubsub.RedisPubSub, logger *log.Logger) *Endpoint {
+func NewEndpoint(redisPubSub *redispubsub.RedisPubSub, logger *slog.Logger) *Endpoint {
 	return &Endpoint{
 		redisPubSub: redisPubSub,
 		logger:      logger,
@@ -39,6 +39,7 @@ func NewEndpoint(redisPubSub *redispubsub.RedisPubSub, logger *log.Logger) *Endp
 func (e *Endpoint) StreamEvents(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "StreamEvents")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -58,12 +59,12 @@ func (e *Endpoint) StreamEvents(c *gin.Context) {
 	// Subscribe to user's Redis channel
 	eventChan, err := e.redisPubSub.SubscribeToUser(ctx, userIDStr)
 	if err != nil {
-		log.Printf("Failed to subscribe: %v", err)
+		e.logger.Error("failed to subscribe to redis pubsub", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to subscribe to events"})
 		return
 	}
 
-	log.Printf("Client connected to SSE stream")
+	e.logger.Info("sse client connected", "user_id", userId)
 
 	// Send initial connection message
 	initialEvent := fmt.Sprintf("data: {\"action\":\"SYSTEM_MESSAGE\",\"data\":{\"message\":\"Connected to real-time events\",\"timestamp\":\"%s\"}}\n\n", time.Now().Format(time.RFC3339))
@@ -79,17 +80,17 @@ func (e *Endpoint) StreamEvents(c *gin.Context) {
 		select {
 		case event, ok := <-eventChan:
 			if !ok {
-				log.Printf("Event channel closed")
+				e.logger.Info("sse event channel closed", "user_id", userId)
 				return
 			}
 
 			// Format the event as SSE
-			sseData := fmt.Sprintf("data: {\"action\":\"%s\",\"data\":%s}\n\n", event.Action, jsonStringify(event.Data))
+			sseData := fmt.Sprintf("data: {\"action\":\"%s\",\"data\":%s}\n\n", event.Action, e.jsonStringify(event.Data))
 
 			// Write to client
 			_, err := c.Writer.WriteString(sseData)
 			if err != nil {
-				log.Printf("Failed to write to client: %v", err)
+				e.logger.Warn("failed to write sse to client", "error", err)
 				return
 			}
 			c.Writer.Flush()
@@ -99,27 +100,26 @@ func (e *Endpoint) StreamEvents(c *gin.Context) {
 			heartbeatEvent := fmt.Sprintf("data: {\"action\":\"HEARTBEAT\",\"data\":{\"timestamp\":\"%s\"}}\n\n", time.Now().Format(time.RFC3339))
 			_, err := c.Writer.WriteString(heartbeatEvent)
 			if err != nil {
-				log.Printf("Failed to send heartbeat: %v", err)
+				e.logger.Warn("failed to send sse heartbeat", "error", err)
 				return
 			}
 			c.Writer.Flush()
 
 		case <-ctx.Done():
-			log.Printf("Client disconnected")
+			e.logger.Info("sse client disconnected", "user_id", userId)
 			return
 		}
 	}
 }
 
-// Helper function to stringify JSON data
-func jsonStringify(data interface{}) string {
+func (e *Endpoint) jsonStringify(data interface{}) string {
 	if data == nil {
 		return "null"
 	}
 
 	jsonBytes, err := json.Marshal(data)
 	if err != nil {
-		log.Printf("Error marshaling data to JSON: %v", err)
+		e.logger.Error("failed to marshal sse event data", "error", err)
 		return "null"
 	}
 
@@ -141,6 +141,7 @@ func jsonStringify(data interface{}) string {
 func (e *Endpoint) TriggerTestEvent(c *gin.Context) {
 	userID := c.GetUint("userId")
 	if userID == 0 {
+		e.logger.Info("unauthorized", "handler", "TriggerTestEvent")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -149,7 +150,7 @@ func (e *Endpoint) TriggerTestEvent(c *gin.Context) {
 	// Parse request body
 	var requestData map[string]interface{}
 	if err := c.ShouldBindJSON(&requestData); err != nil {
-		log.Printf("Failed to parse request body: %v", err)
+		e.logger.Warn("failed to bind JSON", "handler", "TriggerTestEvent", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
@@ -164,12 +165,12 @@ func (e *Endpoint) TriggerTestEvent(c *gin.Context) {
 	// Send test event
 	err := e.redisPubSub.PublishToUser(c.Request.Context(), userIDStr, redispubsub.EventUserActionRequired, testData)
 	if err != nil {
-		log.Printf("Failed to publish test event: %v", err)
+		e.logger.Error("failed to publish test event", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send test event"})
 		return
 	}
 
-	log.Printf("Test event sent")
+	e.logger.Info("test event sent", "user_id", userID)
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Test event sent successfully",
 		"data":    testData,

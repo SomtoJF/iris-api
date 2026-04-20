@@ -1,7 +1,9 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -17,10 +19,11 @@ import (
 type Endpoint struct {
 	DB           *gorm.DB
 	ClientDomain string
+	logger       *slog.Logger
 }
 
-func NewEndpoint(db *gorm.DB, clientDomain string) *Endpoint {
-	return &Endpoint{DB: db, ClientDomain: clientDomain}
+func NewEndpoint(db *gorm.DB, clientDomain string, logger *slog.Logger) *Endpoint {
+	return &Endpoint{DB: db, ClientDomain: clientDomain, logger: logger}
 }
 
 type signUpInput struct {
@@ -56,19 +59,25 @@ func (e *Endpoint) Login(c *gin.Context) {
 	var body loginInput
 
 	if err := c.ShouldBindJSON(&body); err != nil {
+		e.logger.Warn("failed to bind JSON", "handler", "Login", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	var userFound model.User
-	e.DB.Where("email=?", body.Email).Find(&userFound)
-
-	if userFound.IdUser == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "email or password is incorrect"})
+	if err := e.DB.Where("email = ?", body.Email).First(&userFound).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			e.logger.Info("login failed", "reason", "invalid_credentials")
+			c.JSON(http.StatusBadRequest, gin.H{"error": "email or password is incorrect"})
+			return
+		}
+		e.logger.Error("failed to load user for login", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "An error occured"})
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(userFound.PasswordHash), []byte(body.Password)); err != nil {
+		e.logger.Info("login failed", "reason", "invalid_credentials")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email or password is incorrect"})
 		return
 	}
@@ -82,7 +91,9 @@ func (e *Endpoint) Login(c *gin.Context) {
 	token, err := generateToken.SignedString([]byte(os.Getenv("SECRET")))
 
 	if err != nil {
+		e.logger.Error("failed to sign JWT", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "An error occured"})
+		return
 	}
 
 	var secure bool
@@ -94,8 +105,7 @@ func (e *Endpoint) Login(c *gin.Context) {
 		sameSite = http.SameSiteNoneMode
 	}
 
-	// For debugging
-	fmt.Printf("Setting cookie with domain: %s, secure: %v, sameSite: %v\n", domain, secure, sameSite)
+	e.logger.Debug("setting auth cookie", "secure", secure, "same_site", int(sameSite))
 
 	cookie := &http.Cookie{
 		Name:     "Access_Token",
@@ -130,20 +140,27 @@ func (e *Endpoint) Signup(c *gin.Context) {
 	var body signUpInput
 
 	if err := c.ShouldBindJSON(&body); err != nil {
+		e.logger.Warn("failed to bind JSON", "handler", "Signup", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	var userFound model.User
-	e.DB.Where("email=?", body.Email).Find(&userFound)
-
-	if userFound.IdUser != 0 {
+	if err := e.DB.Where("email = ?", body.Email).First(&userFound).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			e.logger.Error("failed to look up user for signup", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "An error occurred"})
+			return
+		}
+	} else {
+		e.logger.Warn("signup rejected", "reason", "email_taken")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "email taken"})
 		return
 	}
 
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(body.Password), bcrypt.DefaultCost)
 	if err != nil {
+		e.logger.Error("failed to hash password for signup", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -156,8 +173,15 @@ func (e *Endpoint) Signup(c *gin.Context) {
 	}
 
 	tx := e.DB.Begin()
+	if tx.Error != nil {
+		e.logger.Error("failed to begin signup transaction", "error", tx.Error)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "An error occurred"})
+		return
+	}
 
 	if err := tx.Create(&user).Error; err != nil {
+		_ = tx.Rollback()
+		e.logger.Error("failed to create user", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error creating user: %s", err)})
 		return
 	}
@@ -170,11 +194,14 @@ func (e *Endpoint) Signup(c *gin.Context) {
 	}
 
 	if err := tx.Create(&jobApplicationProfile).Error; err != nil {
+		_ = tx.Rollback()
+		e.logger.Error("failed to create job application profile", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error creating job application profile: %s", err)})
 		return
 	}
 
 	if err := tx.Commit().Error; err != nil {
+		e.logger.Error("failed to commit signup transaction", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("error committing transaction: %s", err)})
 		return
 	}
@@ -235,6 +262,7 @@ func (e *Endpoint) ResetPassword(c *gin.Context) {
 	var body passwordResetRequest
 
 	if err := c.ShouldBindJSON(&body); err != nil {
+		e.logger.Warn("failed to bind JSON", "handler", "ResetPassword", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -242,12 +270,14 @@ func (e *Endpoint) ResetPassword(c *gin.Context) {
 	// Get the current user from the context
 	user, ok := c.Value("currentUser").(model.User)
 	if !ok {
+		e.logger.Info("unauthorized", "handler", "ResetPassword", "reason", "missing_current_user")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
 		return
 	}
 
 	// Verify the current password
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(body.Password)); err != nil {
+		e.logger.Warn("reset password rejected", "reason", "incorrect_current_password")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Current password is incorrect"})
 		return
 	}
@@ -255,6 +285,7 @@ func (e *Endpoint) ResetPassword(c *gin.Context) {
 	// Hash the new password
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), bcrypt.DefaultCost)
 	if err != nil {
+		e.logger.Error("failed to hash new password", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash new password"})
 		return
 	}
@@ -262,6 +293,7 @@ func (e *Endpoint) ResetPassword(c *gin.Context) {
 	// Update the password in the database
 	user.PasswordHash = string(hashedPassword)
 	if err := e.DB.Save(&user).Error; err != nil {
+		e.logger.Error("failed to update password", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
 		return
 	}
@@ -300,7 +332,8 @@ type GetUserResponse struct {
 func (e *Endpoint) GetCurrentUser(c *gin.Context) {
 	user, ok := c.Value("currentUser").(model.User)
 	if !ok {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "We couldn't retrieve your data"})
+		e.logger.Info("currentUser missing from context", "handler", "GetCurrentUser")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "We couldn't retrieve your data"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": GetUserResponse{

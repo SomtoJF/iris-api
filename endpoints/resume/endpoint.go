@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -24,12 +24,12 @@ import (
 type Endpoint struct {
 	db             *gorm.DB
 	s3Manager      *s3pkg.S3Manager
-	logger         *log.Logger
+	logger         *slog.Logger
 	temporalClient client.Client
 	taskQueueName  temporal.TaskQueueName
 }
 
-func NewEndpoint(db *gorm.DB, s3Manager *s3pkg.S3Manager, logger *log.Logger, temporalClient client.Client, taskQueueName temporal.TaskQueueName) *Endpoint {
+func NewEndpoint(db *gorm.DB, s3Manager *s3pkg.S3Manager, logger *slog.Logger, temporalClient client.Client, taskQueueName temporal.TaskQueueName) *Endpoint {
 	return &Endpoint{db: db, s3Manager: s3Manager, logger: logger, temporalClient: temporalClient, taskQueueName: taskQueueName}
 }
 
@@ -46,12 +46,14 @@ type ResumeDTO struct {
 func (e *Endpoint) FetchResumes(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "FetchResumes")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var resumes []model.Resume
 	if err := e.db.Where("deleted_at IS NULL AND id_user = ?", userId).Order("created_at DESC").Find(&resumes).Error; err != nil {
+		e.logger.Error("failed to fetch resumes", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch resumes"})
 		return
 	}
@@ -76,7 +78,7 @@ func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 	id := c.Param("id")
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Printf("Unauthorized user: %d", userId)
+		e.logger.Info("unauthorized", "handler", "SetResumeAsActive")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -92,7 +94,7 @@ func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 	// Deactivate all resumes for the user
 	if err := tx.Model(&model.Resume{}).Where("deleted_at IS NULL AND id_user = ?", userId).Update("is_active", false).Error; err != nil {
 		tx.Rollback()
-		e.logger.Printf("Failed to deactivate resumes: %v", err)
+		e.logger.Error("failed to deactivate resumes", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to deactivate resumes"})
 		return
 	}
@@ -102,11 +104,11 @@ func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 	if err := tx.Where("id_external = ? AND deleted_at IS NULL AND id_user = ?", id, userId).First(&resume).Error; err != nil {
 		tx.Rollback()
 		if err == gorm.ErrRecordNotFound {
-			e.logger.Printf("Resume not found: %v", err)
+			e.logger.Warn("resume not found", "error", err)
 			c.JSON(http.StatusNotFound, gin.H{"error": "Resume not found"})
 			return
 		}
-		e.logger.Printf("Failed to find resume: %v", err)
+		e.logger.Error("failed to find resume", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find resume"})
 		return
 	}
@@ -114,14 +116,14 @@ func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 	// Set resume as active
 	if err := tx.Model(&resume).Update("is_active", true).Error; err != nil {
 		tx.Rollback()
-		e.logger.Printf("Failed to activate resume: %v", err)
+		e.logger.Error("failed to activate resume", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to activate resume"})
 		return
 	}
 
 	// Commit transaction
 	if err := tx.Commit().Error; err != nil {
-		e.logger.Printf("Failed to commit transaction: %v", err)
+		e.logger.Error("failed to commit transaction", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
 		return
 	}
@@ -132,14 +134,14 @@ func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 func (e *Endpoint) UploadResume(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Printf("Unauthorized user: %d", userId)
+		e.logger.Info("unauthorized", "handler", "UploadResume")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		e.logger.Printf("Failed to get file from request: %v", err)
+		e.logger.Warn("failed to get file from request", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to get file from request"})
 		return
 	}
@@ -150,7 +152,7 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 	// Validate file extension
 	ext := strings.ToLower(filepath.Ext(header.Filename))
 	if ext != ".pdf" && ext != ".doc" && ext != ".docx" {
-		e.logger.Printf("Invalid file extension: %s", ext)
+		e.logger.Warn("invalid file extension", "ext", ext)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Only PDF, DOC, and DOCX files are allowed"})
 		return
 	}
@@ -158,7 +160,7 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 	// Validate file size (2MB max)
 	const maxFileSize = 2 * 1024 * 1024
 	if header.Size > maxFileSize {
-		e.logger.Printf("File size exceeds 2MB: %d", header.Size)
+		e.logger.Warn("file size exceeds limit", "size", header.Size)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File size must not exceed 2MB"})
 		return
 	}
@@ -166,7 +168,7 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 	// Read file content into buffer for reuse
 	fileBytes, err := io.ReadAll(file)
 	if err != nil {
-		e.logger.Printf("Failed to read file: %v", err)
+		e.logger.Error("failed to read file", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
 		return
 	}
@@ -174,7 +176,7 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 	// Extract text from document
 	content, err := utils.ExtractTextFromDocument(bytes.NewReader(fileBytes), header.Filename, header.Size)
 	if err != nil {
-		e.logger.Printf("Failed to extract text from document: %v", err)
+		e.logger.Error("failed to extract text from document", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to extract text from document"})
 		return
 	}
@@ -192,7 +194,7 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 	// Upload to S3
 	ctx := context.Background()
 	if err := e.s3Manager.UploadFile(ctx, s3Key, bytes.NewReader(fileBytes), contentType); err != nil {
-		e.logger.Printf("Failed to upload file to S3: %v", err)
+		e.logger.Error("failed to upload file to S3", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload file to S3"})
 		return
 	}
@@ -212,7 +214,7 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 	if err := e.db.Create(&resume).Error; err != nil {
 		// Attempt to delete from S3 on DB failure
 		_ = e.s3Manager.DeleteFile(ctx, s3Key)
-		e.logger.Printf("Failed to save resume: %v", err)
+		e.logger.Error("failed to save resume", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save resume"})
 		return
 	}
@@ -224,7 +226,7 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 			ResumeContent: resume.Content,
 		}); err != nil {
 			// Just log the error and continue
-			e.logger.Printf("Process resume workflow failed: %v", err)
+			e.logger.Error("process resume workflow failed", "error", err)
 		}
 	}
 
@@ -268,7 +270,7 @@ func (e *Endpoint) DeleteResume(c *gin.Context) {
 	id := c.Param("id")
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Printf("Unauthorized user: %d", userId)
+		e.logger.Info("unauthorized", "handler", "DeleteResume")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -276,11 +278,11 @@ func (e *Endpoint) DeleteResume(c *gin.Context) {
 	var resume model.Resume
 	if err := e.db.Where("id_external = ? AND deleted_at IS NULL AND id_user = ?", id, userId).First(&resume).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			e.logger.Printf("Resume not found: %v", err)
+			e.logger.Warn("resume not found", "error", err)
 			c.JSON(http.StatusNotFound, gin.H{"error": "Resume not found"})
 			return
 		}
-		e.logger.Printf("Failed to find resume: %v", err)
+		e.logger.Error("failed to find resume", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find resume"})
 		return
 	}
@@ -288,7 +290,7 @@ func (e *Endpoint) DeleteResume(c *gin.Context) {
 	// Delete from S3
 	ctx := context.Background()
 	if err := e.s3Manager.DeleteFile(ctx, resume.FileKey); err != nil {
-		e.logger.Printf("Failed to delete file from S3: %v", err)
+		e.logger.Error("failed to delete file from S3", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete file from S3"})
 		return
 	}
@@ -296,7 +298,7 @@ func (e *Endpoint) DeleteResume(c *gin.Context) {
 	// Soft delete in database
 	now := time.Now()
 	if err := e.db.Model(&resume).Update("deleted_at", now).Error; err != nil {
-		e.logger.Printf("Failed to delete resume: %v", err)
+		e.logger.Error("failed to delete resume", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete resume"})
 		return
 	}
@@ -308,7 +310,7 @@ func (e *Endpoint) GetResumeDownloadUrl(c *gin.Context) {
 	id := c.Param("id")
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Printf("Unauthorized user: %d", userId)
+		e.logger.Info("unauthorized", "handler", "GetResumeDownloadUrl")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -316,11 +318,11 @@ func (e *Endpoint) GetResumeDownloadUrl(c *gin.Context) {
 	var resume model.Resume
 	if err := e.db.Where("id_external = ? AND deleted_at IS NULL AND id_user = ?", id, userId).First(&resume).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
-			e.logger.Printf("Resume not found: %v", err)
+			e.logger.Warn("resume not found", "error", err)
 			c.JSON(http.StatusNotFound, gin.H{"error": "Resume not found"})
 			return
 		}
-		e.logger.Printf("Failed to find resume: %v", err)
+		e.logger.Error("failed to find resume", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find resume"})
 		return
 	}
@@ -329,7 +331,7 @@ func (e *Endpoint) GetResumeDownloadUrl(c *gin.Context) {
 	ctx := context.Background()
 	url, err := e.s3Manager.GeneratePresignedURL(ctx, resume.FileKey, 15*time.Minute)
 	if err != nil {
-		e.logger.Printf("Failed to generate download URL: %v", err)
+		e.logger.Error("failed to generate download URL", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate download URL"})
 		return
 	}

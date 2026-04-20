@@ -21,6 +21,7 @@ type Dependencies interface {
 	GetRedisPubSub() *redispubsub.RedisPubSub
 	GetRedisClient() *redis.Client
 	GetS3Manager() *s3pkg.S3Manager
+	GetPosthogClient() posthog.Client
 	Cleanup()
 }
 

@@ -2,7 +2,7 @@ package issue
 
 import (
 	"errors"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -14,10 +14,10 @@ import (
 
 type Endpoint struct {
 	db     *gorm.DB
-	logger *log.Logger
+	logger *slog.Logger
 }
 
-func NewEndpoint(db *gorm.DB, logger *log.Logger) *Endpoint {
+func NewEndpoint(db *gorm.DB, logger *slog.Logger) *Endpoint {
 	return &Endpoint{db: db, logger: logger}
 }
 
@@ -107,14 +107,14 @@ func (e *Endpoint) commentUpvoteMeta(commentPK uint, userId uint) (count int64, 
 func (e *Endpoint) CreateIssue(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Printf("Unauthorized user: %d", userId)
+		e.logger.Info("unauthorized", "handler", "CreateIssue")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var request CreateIssueRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		e.logger.Printf("Failed to bind request: %v", err)
+		e.logger.Warn("failed to bind JSON", "handler", "CreateIssue", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -123,7 +123,7 @@ func (e *Endpoint) CreateIssue(c *gin.Context) {
 	if request.JobApplicationId != "" {
 		var jobApplication model.JobApplication
 		if err := e.db.Where("id_external = ?", request.JobApplicationId).First(&jobApplication).Error; err != nil {
-			e.logger.Printf("Failed to find job application: %v", err)
+			e.logger.Warn("job application not found for issue create", "error", err)
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
 			return
 		}
@@ -142,7 +142,7 @@ func (e *Endpoint) CreateIssue(c *gin.Context) {
 		UserId:  userId,
 	}
 	if err := e.db.Create(&issue).Error; err != nil {
-		e.logger.Printf("Failed to create issue: %v", err)
+		e.logger.Error("failed to create issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create issue"})
 		return
 	}
@@ -154,6 +154,7 @@ func (e *Endpoint) CreateIssue(c *gin.Context) {
 func (e *Endpoint) GetIssue(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "GetIssue")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -171,7 +172,7 @@ func (e *Endpoint) GetIssue(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Printf("Failed to load issue: %v", err)
+		e.logger.Error("failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -205,6 +206,7 @@ func (e *Endpoint) GetIssue(c *gin.Context) {
 func (e *Endpoint) GetIssueComments(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "GetIssueComments")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -221,14 +223,14 @@ func (e *Endpoint) GetIssueComments(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Printf("Failed to load issue: %v", err)
+		e.logger.Error("failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
 
 	var comments []model.IssueComment
 	if err := e.db.Where("id_issue = ?", issue.IdIssue).Preload("User").Order("created_at ASC").Find(&comments).Error; err != nil {
-		e.logger.Printf("Failed to load comments: %v", err)
+		e.logger.Error("failed to load issue comments", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comments"})
 		return
 	}
@@ -255,6 +257,7 @@ func (e *Endpoint) GetIssueComments(c *gin.Context) {
 func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "UpvoteIssueComment")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -276,7 +279,7 @@ func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Printf("Failed to load issue: %v", err)
+		e.logger.Error("failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -287,7 +290,7 @@ func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Comment not found"})
 			return
 		}
-		e.logger.Printf("Failed to load comment: %v", err)
+		e.logger.Error("failed to load comment", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comment"})
 		return
 	}
@@ -306,7 +309,7 @@ func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Already upvoted"})
 			return
 		}
-		e.logger.Printf("Failed to create comment upvote: %v", err)
+		e.logger.Error("failed to create comment upvote", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upvote comment"})
 		return
 	}
@@ -318,6 +321,7 @@ func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
 func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "UndoIssueCommentUpvote")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -339,7 +343,7 @@ func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Printf("Failed to load issue: %v", err)
+		e.logger.Error("failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -350,7 +354,7 @@ func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Comment not found"})
 			return
 		}
-		e.logger.Printf("Failed to load comment: %v", err)
+		e.logger.Error("failed to load comment", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comment"})
 		return
 	}
@@ -362,7 +366,7 @@ func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
 
 	res := e.db.Where("id_issue_comment = ? AND id_user = ?", comment.IdIssueComment, userId).Delete(&model.IssueCommentUpvote{})
 	if res.Error != nil {
-		e.logger.Printf("Failed to remove comment upvote: %v", res.Error)
+		e.logger.Error("failed to remove comment upvote", "error", res.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove upvote"})
 		return
 	}
@@ -378,6 +382,7 @@ func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
 func (e *Endpoint) UpvoteIssue(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "UpvoteIssue")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -394,7 +399,7 @@ func (e *Endpoint) UpvoteIssue(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Printf("Failed to load issue: %v", err)
+		e.logger.Error("failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -408,7 +413,7 @@ func (e *Endpoint) UpvoteIssue(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Already upvoted"})
 			return
 		}
-		e.logger.Printf("Failed to create issue upvote: %v", err)
+		e.logger.Error("failed to create issue upvote", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upvote issue"})
 		return
 	}
@@ -420,6 +425,7 @@ func (e *Endpoint) UpvoteIssue(c *gin.Context) {
 func (e *Endpoint) UndoIssueUpvote(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "UndoIssueUpvote")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -436,14 +442,14 @@ func (e *Endpoint) UndoIssueUpvote(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Printf("Failed to load issue: %v", err)
+		e.logger.Error("failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
 
 	res := e.db.Where("id_issue = ? AND id_user = ?", issue.IdIssue, userId).Delete(&model.IssueUpvote{})
 	if res.Error != nil {
-		e.logger.Printf("Failed to remove issue upvote: %v", res.Error)
+		e.logger.Error("failed to remove issue upvote", "error", res.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove upvote"})
 		return
 	}
@@ -459,6 +465,7 @@ func (e *Endpoint) UndoIssueUpvote(c *gin.Context) {
 func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "CommentOnIssue")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -476,6 +483,7 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 
 	var request CommentOnIssueRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
+		e.logger.Warn("failed to bind JSON", "handler", "CommentOnIssue", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -486,7 +494,7 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Printf("Failed to load issue: %v", err)
+		e.logger.Error("failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -497,7 +505,7 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Comment not found"})
 			return
 		}
-		e.logger.Printf("Failed to load comment: %v", err)
+		e.logger.Error("failed to load comment", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comment"})
 		return
 	}
@@ -513,7 +521,7 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 		Comment: request.Comment,
 	}
 	if err := e.db.Create(&newComment).Error; err != nil {
-		e.logger.Printf("Failed to create comment: %v", err)
+		e.logger.Error("failed to create comment", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create comment"})
 		return
 	}
@@ -525,13 +533,14 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 func (e *Endpoint) MarkIssueAsResolved(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
+		e.logger.Info("unauthorized", "handler", "MarkIssueAsResolved")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	currentUser, ok := c.MustGet("currentUser").(model.User)
 	if !ok {
-		e.logger.Printf("currentUser missing from context")
+		e.logger.Error("currentUser missing from context", "handler", "MarkIssueAsResolved")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal error"})
 		return
 	}
@@ -548,7 +557,7 @@ func (e *Endpoint) MarkIssueAsResolved(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Printf("Failed to load issue: %v", err)
+		e.logger.Error("failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -559,7 +568,7 @@ func (e *Endpoint) MarkIssueAsResolved(c *gin.Context) {
 	}
 
 	if err := e.db.Model(&issue).Update("is_resolved", true).Error; err != nil {
-		e.logger.Printf("Failed to resolve issue: %v", err)
+		e.logger.Error("failed to resolve issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve issue"})
 		return
 	}
