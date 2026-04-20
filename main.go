@@ -8,6 +8,7 @@ import (
 	"github.com/SomtoJF/iris-api/endpoints/auth"
 	"github.com/SomtoJF/iris-api/endpoints/costtracking"
 	"github.com/SomtoJF/iris-api/endpoints/health"
+	"github.com/SomtoJF/iris-api/endpoints/issue"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplication"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplicationprofile"
 	"github.com/SomtoJF/iris-api/endpoints/jobsearch"
@@ -77,6 +78,7 @@ func main() {
 	jobApplicationProfileEndpoint := jobapplicationprofile.NewEndpoint(db, logger)
 	workflowEndpoint := workflowendpoint.NewEndpoint(temporalClient, logger)
 	costTrackingEndpoint := costtracking.NewEndpoint(db)
+	issueEndpoint := issue.NewEndpoint(db, logger)
 
 	authMiddleware := verifyauth.NewMiddleware(db)
 
@@ -116,6 +118,16 @@ func main() {
 		protected.GET("/jobapplicationprofile", jobApplicationProfileEndpoint.GetJobApplicationProfile)
 		protected.POST("/jobapplicationprofile", jobApplicationProfileEndpoint.UpsertJobApplicationProfile)
 		protected.PATCH("/jobapplicationprofile", jobApplicationProfileEndpoint.PatchJobApplicationProfile)
+
+		protected.POST("/issue", issueEndpoint.CreateIssue)
+		protected.GET("/issue/:id", issueEndpoint.GetIssue)
+		protected.GET("/issue/:id/comments", issueEndpoint.GetIssueComments)
+		protected.POST("/issue/:id/upvote", issueEndpoint.UpvoteIssue)
+		protected.DELETE("/issue/:id/upvote", issueEndpoint.UndoIssueUpvote)
+		protected.POST("/issue/:id/comments/:commentId/upvote", issueEndpoint.UpvoteIssueComment)
+		protected.DELETE("/issue/:id/comments/:commentId/upvote", issueEndpoint.UndoIssueCommentUpvote)
+		protected.POST("/issue/:id/comments/:commentId/comment", issueEndpoint.CommentOnIssue)
+		protected.POST("/issue/:id/resolve", issueEndpoint.MarkIssueAsResolved)
 
 		protected.POST("/workflows/signal", workflowEndpoint.SendWorkflowSignal)
 	}

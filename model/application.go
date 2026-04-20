@@ -21,6 +21,7 @@ type JobApplication struct {
 	UserId           uint                 `gorm:"column:id_user;not null;uniqueIndex:idx_job_application_url_user"`
 	User             User                 `gorm:"foreignKey:UserId;references:IdUser"`
 	Status           JobApplicationStatus `gorm:"type:varchar(50);not null"`
+	FailureReason    *string              `gorm:"type:text;default:NULL"`
 	JobTitle         string               `gorm:"type:varchar(255);not null"`
 	CompanyName      string               `gorm:"type:varchar(255);not null"`
 	JobDescription   string               `gorm:"type:text;not null"`
