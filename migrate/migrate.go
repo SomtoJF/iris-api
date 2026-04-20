@@ -54,11 +54,30 @@ func main() {
 	// 	log.Fatal(err)
 	// }
 
-	log.Println("Starting migration on table cost tracking")
-	if err := db.AutoMigrate(&model.CostTracking{}); err != nil {
+	// log.Println("Starting migration on table cost tracking")
+	// if err := db.AutoMigrate(&model.CostTracking{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	log.Println("Starting migration on table issue")
+	if err := db.AutoMigrate(&model.Issue{}); err != nil {
 		log.Fatal(err)
 	}
 
+	log.Println("Starting migration on table issue comment")
+	if err := db.AutoMigrate(&model.IssueComment{}); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("Starting migration on table issue comment upvote")
+	if err := db.AutoMigrate(&model.IssueCommentUpvote{}); err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("Starting migration on table issue upvote")
+	if err := db.AutoMigrate(&model.IssueUpvote{}); err != nil {
+		log.Fatal(err)
+	}
 	log.Println("Migration completed")
 }
 
