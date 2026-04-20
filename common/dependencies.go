@@ -3,11 +3,13 @@ package common
 import (
 	"os"
 
+	posthogInit "github.com/SomtoJF/iris-api/initializers/posthog"
 	redisInit "github.com/SomtoJF/iris-api/initializers/redis"
 	"github.com/SomtoJF/iris-api/initializers/s3"
 	"github.com/SomtoJF/iris-api/initializers/sqldb"
 	redispubsub "github.com/SomtoJF/iris-api/pkg/redis"
 	s3pkg "github.com/SomtoJF/iris-api/pkg/s3"
+	posthog "github.com/posthog/posthog-go"
 	"github.com/redis/go-redis/v9"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
@@ -28,6 +30,7 @@ type dependencies struct {
 	redisPubSub    *redispubsub.RedisPubSub
 	redisClient    *redis.Client
 	s3Manager      *s3pkg.S3Manager
+	posthogClient  posthog.Client
 }
 
 func (d *dependencies) GetDB() *gorm.DB {
@@ -50,6 +53,10 @@ func (d *dependencies) GetS3Manager() *s3pkg.S3Manager {
 	return d.s3Manager
 }
 
+func (d *dependencies) GetPosthogClient() posthog.Client {
+	return d.posthogClient
+}
+
 func (d *dependencies) Cleanup() {
 	// Close the Temporal client
 	if d.temporalClient != nil {
@@ -57,6 +64,7 @@ func (d *dependencies) Cleanup() {
 	}
 
 	redisInit.CloseRedis()
+	posthogInit.ClosePosthog()
 }
 
 func MakeDependencies() (Dependencies, error) {
@@ -82,7 +90,14 @@ func MakeDependencies() (Dependencies, error) {
 		return nil, err
 	}
 
+	err = posthogInit.NewPosthog()
+	if err != nil {
+		return nil, err
+	}
+
 	rdb := redisInit.RedisClient
+
+	posthogClient := posthogInit.PosthogClient
 
 	redisPubSub := redispubsub.NewRedisPubSub(rdb)
 
@@ -100,5 +115,6 @@ func MakeDependencies() (Dependencies, error) {
 		redisPubSub:    redisPubSub,
 		redisClient:    rdb,
 		s3Manager:      s3Manager,
+		posthogClient:  posthogClient,
 	}, nil
 }

@@ -16,6 +16,7 @@ require (
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/lib/pq v1.12.3
 	github.com/nguyenthenguyen/docx v0.0.0-20230621112118-9c8e795a11db
+	github.com/posthog/posthog-go v1.12.1
 	github.com/redis/go-redis/v9 v9.18.0
 	go.temporal.io/sdk v1.39.0
 	golang.org/x/crypto v0.48.0
@@ -60,6 +61,7 @@ require (
 	github.com/golang/mock v1.6.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.2 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0 // indirect
+	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/pgx/v5 v5.6.0 // indirect
