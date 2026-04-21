@@ -1,9 +1,11 @@
 package verifyauth
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/SomtoJF/iris-api/model"
@@ -11,6 +13,22 @@ import (
 	"github.com/golang-jwt/jwt"
 	"gorm.io/gorm"
 )
+
+type ctxKeyUserEmail struct{}
+
+func UserEmailFromContext(ctx context.Context) (string, bool) {
+	v := ctx.Value(ctxKeyUserEmail{})
+	email, ok := v.(string)
+	return email, ok && email != ""
+}
+
+func withUserEmail(ctx context.Context, email string) context.Context {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, ctxKeyUserEmail{}, email)
+}
 
 type Middleware struct {
 	DB *gorm.DB
@@ -63,6 +81,7 @@ func (m *Middleware) VerifyAuth() gin.HandlerFunc {
 			return
 		}
 
+		c.Request = c.Request.WithContext(withUserEmail(c.Request.Context(), user.Email))
 		c.Set("currentUser", user)
 		c.Set("userId", user.IdUser)
 

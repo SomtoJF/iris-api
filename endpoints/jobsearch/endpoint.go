@@ -108,14 +108,14 @@ func jobDiscoveryOutputToResponse(out JobDiscoveryWorkflowOutput) jobSearchRespo
 func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "TriggerJobSearch")
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "TriggerJobSearch")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var body triggerJobSearchRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		e.logger.Warn("failed to bind JSON", "handler", "TriggerJobSearch", "error", err)
+		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "TriggerJobSearch", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -148,14 +148,14 @@ func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 	}
 	workflowRun, err := e.temporalClient.ExecuteWorkflow(c.Request.Context(), workflowOptions, "JobDiscoveryWorkflow", workflowInput)
 	if err != nil {
-		e.logger.Error("failed to start job discovery workflow", "error", err)
+		e.logger.ErrorContext(c.Request.Context(), "failed to start job discovery workflow", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start job search"})
 		return
 	}
 
 	var output JobDiscoveryWorkflowOutput
 	if err := workflowRun.Get(c.Request.Context(), &output); err != nil {
-		e.logger.Error("job discovery workflow failed", "error", err)
+		e.logger.ErrorContext(c.Request.Context(), "job discovery workflow failed", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Job search failed"})
 		return
 	}
@@ -169,7 +169,7 @@ func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 func (e *Endpoint) GetJobSearchHistory(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "GetJobSearchHistory")
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "GetJobSearchHistory")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -186,13 +186,13 @@ func (e *Endpoint) tryGetJobSearchFromCache(ctx context.Context, cacheKey string
 	val, err := e.redis.Get(ctx, cacheKey).Result()
 	if err != nil {
 		if err != redis.Nil {
-			e.logger.Error("job search cache redis GET failed", "error", err, "cache_key", cacheKey)
+			e.logger.ErrorContext(ctx, "job search cache redis GET failed", "error", err, "cache_key", cacheKey)
 		}
 		return JobDiscoveryWorkflowOutput{}, false
 	}
 	var out JobDiscoveryWorkflowOutput
 	if err := json.Unmarshal([]byte(val), &out); err != nil {
-		e.logger.Error("job search cache corrupt entry", "cache_key", cacheKey, "error", err)
+		e.logger.ErrorContext(ctx, "job search cache corrupt entry", "cache_key", cacheKey, "error", err)
 		return JobDiscoveryWorkflowOutput{}, false
 	}
 	return out, true
@@ -204,11 +204,11 @@ func (e *Endpoint) setJobSearchCache(ctx context.Context, cacheKey string, outpu
 	}
 	payload, err := json.Marshal(output)
 	if err != nil {
-		e.logger.Error("job search cache marshal failed", "error", err)
+		e.logger.ErrorContext(ctx, "job search cache marshal failed", "error", err)
 		return
 	}
 	if err := e.redis.Set(ctx, cacheKey, payload, REDIS_JOB_SEARCH_TTL).Err(); err != nil {
-		e.logger.Error("job search cache redis SET failed", "error", err, "cache_key", cacheKey)
+		e.logger.ErrorContext(ctx, "job search cache redis SET failed", "error", err, "cache_key", cacheKey)
 	}
 }
 
@@ -229,19 +229,19 @@ func (e *Endpoint) appendJobSearchHistory(ctx context.Context, userId uint, sear
 	}
 	payload, err := json.Marshal(entry)
 	if err != nil {
-		e.logger.Error("job search history marshal failed", "error", err)
+		e.logger.ErrorContext(ctx, "job search history marshal failed", "error", err)
 		return
 	}
 	key := jobSearchHistoryKey(userId)
 	if err := e.redis.LPush(ctx, key, payload).Err(); err != nil {
-		e.logger.Error("job search history redis LPUSH failed", "error", err)
+		e.logger.ErrorContext(ctx, "job search history redis LPUSH failed", "error", err)
 		return
 	}
 	if err := e.redis.LTrim(ctx, key, 0, int64(JOB_SEARCH_HISTORY_MAX_ENTRIES-1)).Err(); err != nil {
-		e.logger.Error("job search history redis LTRIM failed", "error", err)
+		e.logger.ErrorContext(ctx, "job search history redis LTRIM failed", "error", err)
 	}
 	if err := e.redis.Expire(ctx, key, REDIS_JOB_SEARCH_TTL).Err(); err != nil {
-		e.logger.Error("job search history redis EXPIRE failed", "error", err)
+		e.logger.ErrorContext(ctx, "job search history redis EXPIRE failed", "error", err)
 	}
 }
 
@@ -254,14 +254,14 @@ func (e *Endpoint) listJobSearchHistory(ctx context.Context, userId uint) []JobS
 	key := jobSearchHistoryKey(userId)
 	raw, err := e.redis.LRange(ctx, key, 0, -1).Result()
 	if err != nil {
-		e.logger.Error("job search history redis LRANGE failed", "error", err)
+		e.logger.ErrorContext(ctx, "job search history redis LRANGE failed", "error", err)
 		return out
 	}
 	out = make([]JobSearchHistoryEntryJSON, 0, len(raw))
 	for i, s := range raw {
 		var entry JobSearchHistoryEntryJSON
 		if err := json.Unmarshal([]byte(s), &entry); err != nil {
-			e.logger.Error("job search history corrupt list element", "index", i, "error", err)
+			e.logger.ErrorContext(ctx, "job search history corrupt list element", "index", i, "error", err)
 			continue
 		}
 		out = append(out, entry)

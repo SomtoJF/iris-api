@@ -52,8 +52,10 @@ func main() {
 
 	logger := slog.New(posthog.NewSlogCaptureHandler(baseHandler, posthogClient,
 		posthog.WithDistinctIDFn(func(ctx context.Context, r slog.Record) string {
-			// Return the user ID from context or another source
-			return "user_distinct_id"
+			if email, ok := verifyauth.UserEmailFromContext(ctx); ok {
+				return email
+			}
+			return "anonymous"
 		}),
 	))
 

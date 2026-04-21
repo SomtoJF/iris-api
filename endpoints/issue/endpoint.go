@@ -107,14 +107,14 @@ func (e *Endpoint) commentUpvoteMeta(commentPK uint, userId uint) (count int64, 
 func (e *Endpoint) CreateIssue(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "CreateIssue")
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "CreateIssue")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var request CreateIssueRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		e.logger.Warn("failed to bind JSON", "handler", "CreateIssue", "error", err)
+		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "CreateIssue", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -123,7 +123,7 @@ func (e *Endpoint) CreateIssue(c *gin.Context) {
 	if request.JobApplicationId != "" {
 		var jobApplication model.JobApplication
 		if err := e.db.Where("id_external = ?", request.JobApplicationId).First(&jobApplication).Error; err != nil {
-			e.logger.Warn("job application not found for issue create", "error", err)
+			e.logger.WarnContext(c.Request.Context(), "job application not found for issue create", "error", err)
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
 			return
 		}
@@ -142,7 +142,7 @@ func (e *Endpoint) CreateIssue(c *gin.Context) {
 		UserId:  userId,
 	}
 	if err := e.db.Create(&issue).Error; err != nil {
-		e.logger.Error("failed to create issue", "error", err)
+		e.logger.ErrorContext(c.Request.Context(), "failed to create issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create issue"})
 		return
 	}
@@ -152,9 +152,10 @@ func (e *Endpoint) CreateIssue(c *gin.Context) {
 
 // [get] /issue/{id}
 func (e *Endpoint) GetIssue(c *gin.Context) {
+	reqCtx := c.Request.Context()
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "GetIssue")
+		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "GetIssue")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -172,7 +173,7 @@ func (e *Endpoint) GetIssue(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Error("failed to load issue", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -204,9 +205,10 @@ func (e *Endpoint) GetIssue(c *gin.Context) {
 
 // [get] /issue/{id}/comments
 func (e *Endpoint) GetIssueComments(c *gin.Context) {
+	reqCtx := c.Request.Context()
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "GetIssueComments")
+		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "GetIssueComments")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -223,14 +225,14 @@ func (e *Endpoint) GetIssueComments(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Error("failed to load issue", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
 
 	var comments []model.IssueComment
 	if err := e.db.Where("id_issue = ?", issue.IdIssue).Preload("User").Order("created_at ASC").Find(&comments).Error; err != nil {
-		e.logger.Error("failed to load issue comments", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load issue comments", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comments"})
 		return
 	}
@@ -255,9 +257,10 @@ func (e *Endpoint) GetIssueComments(c *gin.Context) {
 
 // [post] /issue/{id}/comments/{commentId}/upvote
 func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
+	reqCtx := c.Request.Context()
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "UpvoteIssueComment")
+		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "UpvoteIssueComment")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -279,7 +282,7 @@ func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Error("failed to load issue", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -290,7 +293,7 @@ func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Comment not found"})
 			return
 		}
-		e.logger.Error("failed to load comment", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load comment", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comment"})
 		return
 	}
@@ -309,7 +312,7 @@ func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Already upvoted"})
 			return
 		}
-		e.logger.Error("failed to create comment upvote", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to create comment upvote", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upvote comment"})
 		return
 	}
@@ -319,9 +322,10 @@ func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
 
 // [delete] /issue/{id}/comments/{commentId}/upvote
 func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
+	reqCtx := c.Request.Context()
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "UndoIssueCommentUpvote")
+		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "UndoIssueCommentUpvote")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -343,7 +347,7 @@ func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Error("failed to load issue", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -354,7 +358,7 @@ func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Comment not found"})
 			return
 		}
-		e.logger.Error("failed to load comment", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load comment", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comment"})
 		return
 	}
@@ -366,7 +370,7 @@ func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
 
 	res := e.db.Where("id_issue_comment = ? AND id_user = ?", comment.IdIssueComment, userId).Delete(&model.IssueCommentUpvote{})
 	if res.Error != nil {
-		e.logger.Error("failed to remove comment upvote", "error", res.Error)
+		e.logger.ErrorContext(reqCtx, "failed to remove comment upvote", "error", res.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove upvote"})
 		return
 	}
@@ -380,9 +384,10 @@ func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
 
 // [post] /issue/{id}/upvote
 func (e *Endpoint) UpvoteIssue(c *gin.Context) {
+	reqCtx := c.Request.Context()
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "UpvoteIssue")
+		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "UpvoteIssue")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -399,7 +404,7 @@ func (e *Endpoint) UpvoteIssue(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Error("failed to load issue", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -413,7 +418,7 @@ func (e *Endpoint) UpvoteIssue(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Already upvoted"})
 			return
 		}
-		e.logger.Error("failed to create issue upvote", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to create issue upvote", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upvote issue"})
 		return
 	}
@@ -423,9 +428,10 @@ func (e *Endpoint) UpvoteIssue(c *gin.Context) {
 
 // [delete] /issue/{id}/upvote
 func (e *Endpoint) UndoIssueUpvote(c *gin.Context) {
+	reqCtx := c.Request.Context()
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "UndoIssueUpvote")
+		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "UndoIssueUpvote")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -442,14 +448,14 @@ func (e *Endpoint) UndoIssueUpvote(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Error("failed to load issue", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
 
 	res := e.db.Where("id_issue = ? AND id_user = ?", issue.IdIssue, userId).Delete(&model.IssueUpvote{})
 	if res.Error != nil {
-		e.logger.Error("failed to remove issue upvote", "error", res.Error)
+		e.logger.ErrorContext(reqCtx, "failed to remove issue upvote", "error", res.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove upvote"})
 		return
 	}
@@ -463,9 +469,10 @@ func (e *Endpoint) UndoIssueUpvote(c *gin.Context) {
 
 // [post] /issue/{id}/comments/{commentId}/comment
 func (e *Endpoint) CommentOnIssue(c *gin.Context) {
+	reqCtx := c.Request.Context()
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "CommentOnIssue")
+		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "CommentOnIssue")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -483,7 +490,7 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 
 	var request CommentOnIssueRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		e.logger.Warn("failed to bind JSON", "handler", "CommentOnIssue", "error", err)
+		e.logger.WarnContext(reqCtx, "failed to bind JSON", "handler", "CommentOnIssue", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -494,7 +501,7 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Error("failed to load issue", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -505,7 +512,7 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Comment not found"})
 			return
 		}
-		e.logger.Error("failed to load comment", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load comment", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comment"})
 		return
 	}
@@ -521,7 +528,7 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 		Comment: request.Comment,
 	}
 	if err := e.db.Create(&newComment).Error; err != nil {
-		e.logger.Error("failed to create comment", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to create comment", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create comment"})
 		return
 	}
@@ -531,16 +538,17 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 
 // [post] /issue/{id}/resolve
 func (e *Endpoint) MarkIssueAsResolved(c *gin.Context) {
+	reqCtx := c.Request.Context()
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "MarkIssueAsResolved")
+		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "MarkIssueAsResolved")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	currentUser, ok := c.MustGet("currentUser").(model.User)
 	if !ok {
-		e.logger.Error("currentUser missing from context", "handler", "MarkIssueAsResolved")
+		e.logger.ErrorContext(reqCtx, "currentUser missing from context", "handler", "MarkIssueAsResolved")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal error"})
 		return
 	}
@@ -557,7 +565,7 @@ func (e *Endpoint) MarkIssueAsResolved(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
 		}
-		e.logger.Error("failed to load issue", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
 		return
 	}
@@ -568,7 +576,7 @@ func (e *Endpoint) MarkIssueAsResolved(c *gin.Context) {
 	}
 
 	if err := e.db.Model(&issue).Update("is_resolved", true).Error; err != nil {
-		e.logger.Error("failed to resolve issue", "error", err)
+		e.logger.ErrorContext(reqCtx, "failed to resolve issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve issue"})
 		return
 	}

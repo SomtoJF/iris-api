@@ -27,14 +27,14 @@ type SendSignalRequest struct {
 func (e *Endpoint) SendWorkflowSignal(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "SendWorkflowSignal")
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "SendWorkflowSignal")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var req SendSignalRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		e.logger.Warn("failed to bind JSON", "handler", "SendWorkflowSignal", "error", err)
+		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "SendWorkflowSignal", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -47,7 +47,7 @@ func (e *Endpoint) SendWorkflowSignal(c *gin.Context) {
 		req.Payload,
 	)
 	if err != nil {
-		e.logger.Error("failed to signal workflow", "workflow_id", req.WorkflowID, "error", err)
+		e.logger.ErrorContext(c.Request.Context(), "failed to signal workflow", "workflow_id", req.WorkflowID, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to signal workflow"})
 		return
 	}

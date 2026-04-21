@@ -77,14 +77,14 @@ type GetJobApplicationProfileResponse struct {
 func (e *Endpoint) GetJobApplicationProfile(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "GetJobApplicationProfile")
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "GetJobApplicationProfile")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var jobApplicationProfile model.JobApplicationProfile
 	if err := e.db.Where("id_user = ?", userId).First(&jobApplicationProfile).Error; err != nil {
-		e.logger.Error("failed to find job application profile", "error", err)
+		e.logger.ErrorContext(c.Request.Context(), "failed to find job application profile", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find job application profile"})
 		return
 	}
@@ -120,14 +120,14 @@ func (e *Endpoint) GetJobApplicationProfile(c *gin.Context) {
 func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "UpsertJobApplicationProfile")
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "UpsertJobApplicationProfile")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var input UpsertJobApplicationProfileRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		e.logger.Warn("failed to bind JSON", "handler", "UpsertJobApplicationProfile", "error", err)
+		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "UpsertJobApplicationProfile", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to bind JSON"})
 		return
 	}
@@ -136,7 +136,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 	if err != nil {
 		dateOfBirth, err = time.Parse("2006-01-02", input.DateOfBirth)
 		if err != nil {
-			e.logger.Warn("invalid date of birth format", "error", err)
+			e.logger.WarnContext(c.Request.Context(), "invalid date of birth format", "error", err)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid dateOfBirth; use ISO 8601 format (e.g. 2006-01-02)"})
 			return
 		}
@@ -145,7 +145,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 	var jobApplicationProfile model.JobApplicationProfile
 	err = e.db.Where("id_user = ?", userId).First(&jobApplicationProfile).Error
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		e.logger.Error("failed to find job application profile", "error", err)
+		e.logger.ErrorContext(c.Request.Context(), "failed to find job application profile", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find job application profile"})
 		return
 	}
@@ -177,7 +177,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 			PortfolioLink:               input.PortfolioLink,
 		}
 		if err := e.db.Create(&jobApplicationProfile).Error; err != nil {
-			e.logger.Error("failed to create job application profile", "error", err)
+			e.logger.ErrorContext(c.Request.Context(), "failed to create job application profile", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create job application profile"})
 			return
 		}
@@ -212,7 +212,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 	jobApplicationProfile.PortfolioLink = input.PortfolioLink
 
 	if err := e.db.Save(&jobApplicationProfile).Error; err != nil {
-		e.logger.Error("failed to update job application profile", "error", err)
+		e.logger.ErrorContext(c.Request.Context(), "failed to update job application profile", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application profile"})
 		return
 	}
@@ -252,14 +252,14 @@ type PatchJobApplicationProfileRequest struct {
 func (e *Endpoint) PatchJobApplicationProfile(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.Info("unauthorized", "handler", "PatchJobApplicationProfile")
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "PatchJobApplicationProfile")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var input PatchJobApplicationProfileRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		e.logger.Warn("failed to bind JSON", "handler", "PatchJobApplicationProfile", "error", err)
+		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "PatchJobApplicationProfile", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
@@ -286,7 +286,7 @@ func (e *Endpoint) PatchJobApplicationProfile(c *gin.Context) {
 	}
 
 	if err := e.db.Model(&profile).Updates(updates).Error; err != nil {
-		e.logger.Error("failed to patch job application profile", "error", err)
+		e.logger.ErrorContext(c.Request.Context(), "failed to patch job application profile", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application profile"})
 		return
 	}
