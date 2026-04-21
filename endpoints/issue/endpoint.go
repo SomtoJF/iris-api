@@ -1,32 +1,39 @@
 package issue
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/SomtoJF/iris-api/model"
+	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
 )
 
 type Endpoint struct {
-	db     *gorm.DB
-	logger *slog.Logger
+	db             *gorm.DB
+	temporalClient client.Client
+	logger         *slog.Logger
+	taskQueueName  temporal.TaskQueueName
 }
 
-func NewEndpoint(db *gorm.DB, logger *slog.Logger) *Endpoint {
-	return &Endpoint{db: db, logger: logger}
+func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger, taskQueueName temporal.TaskQueueName) *Endpoint {
+	return &Endpoint{db: db, temporalClient: temporalClient, logger: logger, taskQueueName: taskQueueName}
 }
 
 type CreateIssueRequest struct {
-	Title            string `json:"title" binding:"required"`
-	Type             string `json:"type" binding:"required"`
-	JobApplicationId string `json:"jobApplicationId"`
-	Description      string `json:"description" binding:"required"`
-	Summary          string `json:"summary"`
+	Title            string          `json:"title" binding:"required"`
+	Type             string          `json:"type" binding:"required"`
+	JobApplicationId string          `json:"jobApplicationId"`
+	ContentJSON      json.RawMessage `json:"contentJson" binding:"required"`
+	ContentText      string          `json:"contentText" binding:"required"`
 }
 
 type jobApplication struct {
@@ -41,20 +48,21 @@ type jobApplication struct {
 }
 
 type GetIssueResponse struct {
-	Id               string         `json:"id"`
-	Title            string         `json:"title"`
-	Type             string         `json:"type"`
-	JobApplicationId string         `json:"jobApplicationId"`
-	Description      string         `json:"description"`
-	Summary          string         `json:"summary"`
-	IsResolved       bool           `json:"isResolved"`
-	OwnerId          string         `json:"ownerId"`
-	IsUserOwner      bool           `json:"isUserOwner"`
-	JobApplication   jobApplication `json:"jobApplication"`
-	UpvoteCount      int            `json:"upvoteCount"`
-	UserUpvoted      bool           `json:"userUpvoted"`
-	CreatedAt        time.Time      `json:"createdAt"`
-	UpdatedAt        time.Time      `json:"updatedAt"`
+	Id               string          `json:"id"`
+	Title            string          `json:"title"`
+	Type             string          `json:"type"`
+	JobApplicationId string          `json:"jobApplicationId"`
+	ContentJSON      json.RawMessage `json:"contentJson"`
+	ContentText      string          `json:"contentText"`
+	Summary          string          `json:"summary"`
+	IsResolved       bool            `json:"isResolved"`
+	OwnerId          string          `json:"ownerId"`
+	IsUserOwner      bool            `json:"isUserOwner"`
+	JobApplication   jobApplication  `json:"jobApplication"`
+	UpvoteCount      int             `json:"upvoteCount"`
+	UserUpvoted      bool            `json:"userUpvoted"`
+	CreatedAt        time.Time       `json:"createdAt"`
+	UpdatedAt        time.Time       `json:"updatedAt"`
 }
 
 type GetIssueCommentsResponse struct {
@@ -164,20 +172,26 @@ func (e *Endpoint) CreateIssue(c *gin.Context) {
 		Title:            request.Title,
 		Type:             issueType,
 		JobApplicationId: jobAppID,
-		Description:      request.Description,
-		// TODO: LLM should generate the summary
-		Summary: func() string {
-			if request.Summary != "" {
-				return request.Summary
-			}
-			return request.Description
-		}(),
-		UserId: userId,
+		ContentJSON:      request.ContentJSON,
+		ContentText:      request.ContentText,
+		UserId:           userId,
 	}
 	if err := e.db.Create(&issue).Error; err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to create issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create issue"})
 		return
+	}
+
+	// Fire-and-forget: kick off summary generation asynchronously.
+	workflowOptions := client.StartWorkflowOptions{
+		ID:        fmt.Sprintf("summarize-issue-%s-%s", issue.IdExternal.String(), uuid.New().String()),
+		TaskQueue: string(e.taskQueueName),
+	}
+	workflowInput := map[string]string{
+		"issue_external_id": issue.IdExternal.String(),
+	}
+	if _, err := e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "SummarizeIssueWorkflow", workflowInput); err != nil {
+		e.logger.WarnContext(c.Request.Context(), "failed to start summarize issue workflow", "issue_id", issue.IdExternal.String(), "error", err)
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Issue created successfully"})
@@ -240,11 +254,16 @@ func (e *Endpoint) FetchIssues(c *gin.Context) {
 		var upvoteCount int64
 		e.db.Model(&model.IssueUpvote{}).Where("id_issue = ?", issue.IdIssue).Count(&upvoteCount)
 
+		summary := ""
+		if issue.Summary != nil {
+			summary = *issue.Summary
+		}
+
 		out = append(out, IssueListItem{
 			Id:           issue.IdExternal.String(),
 			Title:        issue.Title,
 			Type:         string(issue.Type),
-			Summary:      issue.Summary,
+			Summary:      summary,
 			IsResolved:   issue.IsResolved,
 			UpvoteCount:  int(upvoteCount),
 			CommentCount: int(commentCount),
@@ -296,13 +315,19 @@ func (e *Endpoint) GetIssue(c *gin.Context) {
 		jobAppIDStr = issue.JobApplication.IdExternal.String()
 	}
 
+	summary := ""
+	if issue.Summary != nil {
+		summary = *issue.Summary
+	}
+
 	c.JSON(http.StatusOK, GetIssueResponse{
 		Id:               issue.IdExternal.String(),
 		Title:            issue.Title,
 		Type:             string(issue.Type),
 		JobApplicationId: jobAppIDStr,
-		Description:      issue.Description,
-		Summary:          issue.Summary,
+		ContentJSON:      issue.ContentJSON,
+		ContentText:      issue.ContentText,
+		Summary:          summary,
 		IsResolved:       issue.IsResolved,
 		OwnerId:          issue.User.IdExternal.String(),
 		IsUserOwner:      issue.UserId == userId,

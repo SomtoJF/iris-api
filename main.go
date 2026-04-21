@@ -94,7 +94,7 @@ func main() {
 	jobApplicationProfileEndpoint := jobapplicationprofile.NewEndpoint(db, logger)
 	workflowEndpoint := workflowendpoint.NewEndpoint(temporalClient, logger)
 	costTrackingEndpoint := costtracking.NewEndpoint(db)
-	issueEndpoint := issue.NewEndpoint(db, logger)
+	issueEndpoint := issue.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 
 	authMiddleware := verifyauth.NewMiddleware(db)
 

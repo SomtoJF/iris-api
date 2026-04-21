@@ -86,12 +86,16 @@ func main() {
 func dropAllApplicationTables() {
 	log.Println("Dropping existing application tables (if any)")
 	tables := []interface{}{
-		&model.CostTracking{},
-		&model.UserAction{},
-		&model.Resume{},
-		&model.JobApplication{},
-		&model.JobApplicationProfile{},
-		&model.User{},
+		// &model.CostTracking{},
+		// &model.UserAction{},
+		// &model.Resume{},
+		// &model.JobApplication{},
+		// &model.JobApplicationProfile{},
+		// &model.User{},
+		&model.Issue{},
+		// &model.IssueComment{},
+		// &model.IssueCommentUpvote{},
+		// &model.IssueUpvote{},
 	}
 	for _, t := range tables {
 		if err := db.Migrator().DropTable(t); err != nil {

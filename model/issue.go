@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,14 +23,16 @@ type Issue struct {
 	User             User            `gorm:"foreignKey:UserId;references:IdUser"`
 	JobApplicationId *uint           `gorm:"column:id_job_application;default:NULL"`
 	JobApplication   *JobApplication `gorm:"foreignKey:JobApplicationId;references:IdJobApplication;default:NULL"`
-	Description      string          `gorm:"not null"`
-	Summary          string          `gorm:"not null"`
-	Comments         []IssueComment  `gorm:"foreignKey:IssueId;references:IdIssue"`
-	Upvotes          []IssueUpvote   `gorm:"foreignKey:IssueId;references:IdIssue"`
-	IsResolved       bool            `gorm:"default:false"`
-	CreatedAt        time.Time       `gorm:"default:CURRENT_TIMESTAMP"`
-	UpdatedAt        time.Time       `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
-	DeletedAt        *time.Time      `gorm:"index;default:NULL"`
+	// content is stored as JSON for rich text editing
+	ContentJSON json.RawMessage `gorm:"type:jsonb;not null" json:"content_json"`
+	ContentText string          `gorm:"not null"`
+	Summary     *string         `gorm:"default:NULL"`
+	Comments    []IssueComment  `gorm:"foreignKey:IssueId;references:IdIssue"`
+	Upvotes     []IssueUpvote   `gorm:"foreignKey:IssueId;references:IdIssue"`
+	IsResolved  bool            `gorm:"default:false"`
+	CreatedAt   time.Time       `gorm:"default:CURRENT_TIMESTAMP"`
+	UpdatedAt   time.Time       `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`
+	DeletedAt   *time.Time      `gorm:"index;default:NULL"`
 }
 
 func (Issue) TableName() string {
