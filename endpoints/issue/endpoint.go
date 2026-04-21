@@ -58,7 +58,7 @@ type GetIssueResponse struct {
 	IsResolved       bool            `json:"isResolved"`
 	OwnerId          string          `json:"ownerId"`
 	IsUserOwner      bool            `json:"isUserOwner"`
-	JobApplication   jobApplication  `json:"jobApplication"`
+	JobApplication   *jobApplication `json:"jobApplication,omitempty"`
 	UpvoteCount      int             `json:"upvoteCount"`
 	UserUpvoted      bool            `json:"userUpvoted"`
 	CreatedAt        time.Time       `json:"createdAt"`
@@ -121,11 +121,11 @@ type FetchIssuesResponse struct {
 	Limit int             `json:"limit"`
 }
 
-func jobApplicationToDTO(ja *model.JobApplication) jobApplication {
+func jobApplicationToDTO(ja *model.JobApplication) *jobApplication {
 	if ja == nil {
-		return jobApplication{}
+		return nil
 	}
-	return jobApplication{
+	return &jobApplication{
 		Id:            ja.IdExternal.String(),
 		Title:         ja.JobTitle,
 		CompanyName:   ja.CompanyName,
@@ -231,8 +231,6 @@ func (e *Endpoint) FetchIssues(c *gin.Context) {
 	baseQuery := e.db.Model(&model.Issue{})
 	if request.Resolved != nil {
 		baseQuery = baseQuery.Where("is_resolved = ?", *request.Resolved)
-	} else {
-		baseQuery = baseQuery.Where("is_resolved = ?", false)
 	}
 	if request.Type != "" {
 		baseQuery = baseQuery.Where("type = ?", request.Type)
