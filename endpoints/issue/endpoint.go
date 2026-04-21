@@ -713,6 +713,11 @@ func (e *Endpoint) CreateIssueComment(c *gin.Context) {
 		return
 	}
 
+	if issue.IsResolved {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Comments are disabled on resolved issues"})
+		return
+	}
+
 	newComment := model.IssueComment{
 		IssueId:     issue.IdIssue,
 		UserId:      userId,
