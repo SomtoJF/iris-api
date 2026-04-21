@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,7 +14,8 @@ type IssueComment struct {
 	Issue          Issue                `gorm:"foreignKey:IssueId;references:IdIssue"`
 	UserId         uint                 `gorm:"column:id_user;not null"`
 	User           User                 `gorm:"foreignKey:UserId;references:IdUser"`
-	Comment        string               `gorm:"type:text;not null"`
+	CommentJSON    json.RawMessage      `gorm:"type:jsonb;not null" json:"comment_json"`
+	CommentText    string               `gorm:"not null"`
 	Upvotes        []IssueCommentUpvote `gorm:"foreignKey:IssueCommentId;references:IdIssueComment"`
 	CreatedAt      time.Time            `gorm:"default:CURRENT_TIMESTAMP"`
 	UpdatedAt      time.Time            `gorm:"default:CURRENT_TIMESTAMP;autoUpdateTime"`

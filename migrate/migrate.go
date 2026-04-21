@@ -92,8 +92,8 @@ func dropAllApplicationTables() {
 		// &model.JobApplication{},
 		// &model.JobApplicationProfile{},
 		// &model.User{},
-		&model.Issue{},
-		// &model.IssueComment{},
+		// &model.Issue{},
+		&model.IssueComment{},
 		// &model.IssueCommentUpvote{},
 		// &model.IssueUpvote{},
 	}

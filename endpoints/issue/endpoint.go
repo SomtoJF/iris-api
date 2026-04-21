@@ -66,18 +66,20 @@ type GetIssueResponse struct {
 }
 
 type GetIssueCommentsResponse struct {
-	Id          string    `json:"id"`
-	Comment     string    `json:"comment"`
-	OwnerId     string    `json:"ownerId"`
-	IsUserOwner bool      `json:"isUserOwner"`
-	UpvoteCount int       `json:"upvoteCount"`
-	UserUpvoted bool      `json:"userUpvoted"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	Id          string          `json:"id"`
+	CommentJSON json.RawMessage `json:"commentJson"`
+	CommentText string          `json:"commentText"`
+	OwnerId     string          `json:"ownerId"`
+	IsUserOwner bool            `json:"isUserOwner"`
+	UpvoteCount int             `json:"upvoteCount"`
+	UserUpvoted bool            `json:"userUpvoted"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	UpdatedAt   time.Time       `json:"updatedAt"`
 }
 
 type CommentOnIssueRequest struct {
-	Comment string `json:"comment" binding:"required"`
+	CommentJSON json.RawMessage `json:"commentJson" binding:"required"`
+	CommentText string          `json:"commentText" binding:"required"`
 }
 
 type FetchIssuesRequest struct {
@@ -378,7 +380,8 @@ func (e *Endpoint) GetIssueComments(c *gin.Context) {
 		upCount, userUp := e.commentUpvoteMeta(com.IdIssueComment, userId)
 		out = append(out, GetIssueCommentsResponse{
 			Id:          com.IdExternal.String(),
-			Comment:     com.Comment,
+			CommentJSON: com.CommentJSON,
+			CommentText: com.CommentText,
 			OwnerId:     com.User.IdExternal.String(),
 			IsUserOwner: com.UserId == userId,
 			UpvoteCount: int(upCount),
@@ -659,9 +662,10 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 	}
 
 	newComment := model.IssueComment{
-		IssueId: issue.IdIssue,
-		UserId:  userId,
-		Comment: request.Comment,
+		IssueId:     issue.IdIssue,
+		UserId:      userId,
+		CommentJSON: request.CommentJSON,
+		CommentText: request.CommentText,
 	}
 	if err := e.db.Create(&newComment).Error; err != nil {
 		e.logger.ErrorContext(reqCtx, "failed to create comment", "error", err)
