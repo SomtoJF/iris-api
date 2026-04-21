@@ -26,6 +26,7 @@ type CreateIssueRequest struct {
 	Type             string `json:"type" binding:"required"`
 	JobApplicationId string `json:"jobApplicationId"`
 	Description      string `json:"description" binding:"required"`
+	Summary          string `json:"summary"`
 }
 
 type jobApplication struct {
@@ -69,6 +70,33 @@ type GetIssueCommentsResponse struct {
 
 type CommentOnIssueRequest struct {
 	Comment string `json:"comment" binding:"required"`
+}
+
+type FetchIssuesRequest struct {
+	Page     int    `form:"page" binding:"required"`
+	Limit    int    `form:"limit" binding:"required"`
+	Search   string `form:"search"`
+	Type     string `form:"type"`
+	Resolved *bool  `form:"resolved"`
+}
+
+type IssueListItem struct {
+	Id           string    `json:"id"`
+	Title        string    `json:"title"`
+	Type         string    `json:"type"`
+	Summary      string    `json:"summary"`
+	IsResolved   bool      `json:"isResolved"`
+	UpvoteCount  int       `json:"upvoteCount"`
+	CommentCount int       `json:"commentCount"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+type FetchIssuesResponse struct {
+	Data  []IssueListItem `json:"data"`
+	Total int             `json:"total"`
+	Page  int             `json:"page"`
+	Limit int             `json:"limit"`
 }
 
 func jobApplicationToDTO(ja *model.JobApplication) jobApplication {
@@ -138,8 +166,13 @@ func (e *Endpoint) CreateIssue(c *gin.Context) {
 		JobApplicationId: jobAppID,
 		Description:      request.Description,
 		// TODO: LLM should generate the summary
-		Summary: request.Description,
-		UserId:  userId,
+		Summary: func() string {
+			if request.Summary != "" {
+				return request.Summary
+			}
+			return request.Description
+		}(),
+		UserId: userId,
 	}
 	if err := e.db.Create(&issue).Error; err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to create issue", "error", err)
@@ -148,6 +181,84 @@ func (e *Endpoint) CreateIssue(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, gin.H{"message": "Issue created successfully"})
+}
+
+// [get] /issues
+func (e *Endpoint) FetchIssues(c *gin.Context) {
+	reqCtx := c.Request.Context()
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "FetchIssues")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var request FetchIssuesRequest
+	if err := c.ShouldBindQuery(&request); err != nil {
+		e.logger.WarnContext(reqCtx, "failed to bind query", "handler", "FetchIssues", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	baseQuery := e.db.Model(&model.Issue{})
+	if request.Resolved != nil {
+		baseQuery = baseQuery.Where("is_resolved = ?", *request.Resolved)
+	} else {
+		baseQuery = baseQuery.Where("is_resolved = ?", false)
+	}
+	if request.Type != "" {
+		baseQuery = baseQuery.Where("type = ?", request.Type)
+	}
+	if request.Search != "" {
+		like := "%" + request.Search + "%"
+		baseQuery = baseQuery.Where("title LIKE ? OR summary LIKE ?", like, like)
+	}
+
+	var issues []model.Issue
+	if err := baseQuery.
+		Order("created_at DESC").
+		Limit(request.Limit).
+		Offset((request.Page - 1) * request.Limit).
+		Find(&issues).Error; err != nil {
+		e.logger.ErrorContext(reqCtx, "failed to fetch issues", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch issues"})
+		return
+	}
+
+	var total int64
+	if err := baseQuery.Count(&total).Error; err != nil {
+		e.logger.ErrorContext(reqCtx, "failed to count issues", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch total issues"})
+		return
+	}
+
+	out := make([]IssueListItem, 0, len(issues))
+	for _, issue := range issues {
+		var commentCount int64
+		e.db.Model(&model.IssueComment{}).Where("id_issue = ?", issue.IdIssue).Count(&commentCount)
+
+		var upvoteCount int64
+		e.db.Model(&model.IssueUpvote{}).Where("id_issue = ?", issue.IdIssue).Count(&upvoteCount)
+
+		out = append(out, IssueListItem{
+			Id:           issue.IdExternal.String(),
+			Title:        issue.Title,
+			Type:         string(issue.Type),
+			Summary:      issue.Summary,
+			IsResolved:   issue.IsResolved,
+			UpvoteCount:  int(upvoteCount),
+			CommentCount: int(commentCount),
+			CreatedAt:    issue.CreatedAt,
+			UpdatedAt:    issue.UpdatedAt,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": FetchIssuesResponse{
+		Data:  out,
+		Total: int(total),
+		Page:  request.Page,
+		Limit: request.Limit,
+	}})
 }
 
 // [get] /issue/{id}

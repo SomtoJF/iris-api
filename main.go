@@ -135,6 +135,7 @@ func main() {
 		protected.POST("/jobapplicationprofile", jobApplicationProfileEndpoint.UpsertJobApplicationProfile)
 		protected.PATCH("/jobapplicationprofile", jobApplicationProfileEndpoint.PatchJobApplicationProfile)
 
+		protected.GET("/issues", issueEndpoint.FetchIssues)
 		protected.POST("/issue", issueEndpoint.CreateIssue)
 		protected.GET("/issue/:id", issueEndpoint.GetIssue)
 		protected.GET("/issue/:id/comments", issueEndpoint.GetIssueComments)
