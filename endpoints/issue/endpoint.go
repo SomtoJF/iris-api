@@ -77,6 +77,18 @@ type GetIssueCommentsResponse struct {
 	UpdatedAt   time.Time       `json:"updatedAt"`
 }
 
+type GetIssueCommentsRequest struct {
+	Page  int `form:"page" binding:"required"`
+	Limit int `form:"limit" binding:"required"`
+}
+
+type GetIssueCommentsPaginatedResponse struct {
+	Data  []GetIssueCommentsResponse `json:"data"`
+	Total int                        `json:"total"`
+	Page  int                        `json:"page"`
+	Limit int                        `json:"limit"`
+}
+
 type CommentOnIssueRequest struct {
 	CommentJSON json.RawMessage `json:"commentJson" binding:"required"`
 	CommentText string          `json:"commentText" binding:"required"`
@@ -357,6 +369,22 @@ func (e *Endpoint) GetIssueComments(c *gin.Context) {
 		return
 	}
 
+	var request GetIssueCommentsRequest
+	if err := c.ShouldBindQuery(&request); err != nil {
+		e.logger.WarnContext(reqCtx, "failed to bind query", "handler", "GetIssueComments", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if request.Page < 1 {
+		request.Page = 1
+	}
+	if request.Limit < 1 {
+		request.Limit = 20
+	}
+	if request.Limit > 100 {
+		request.Limit = 100
+	}
+
 	var issue model.Issue
 	if err := e.db.Where("id_external = ?", issueUUID).First(&issue).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -369,8 +397,22 @@ func (e *Endpoint) GetIssueComments(c *gin.Context) {
 	}
 
 	var comments []model.IssueComment
-	if err := e.db.Where("id_issue = ?", issue.IdIssue).Preload("User").Order("created_at ASC").Find(&comments).Error; err != nil {
+	baseQuery := e.db.Model(&model.IssueComment{}).Where("id_issue = ?", issue.IdIssue)
+
+	if err := baseQuery.
+		Preload("User").
+		Order("created_at ASC").
+		Limit(request.Limit).
+		Offset((request.Page - 1) * request.Limit).
+		Find(&comments).Error; err != nil {
 		e.logger.ErrorContext(reqCtx, "failed to load issue comments", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comments"})
+		return
+	}
+
+	var total int64
+	if err := baseQuery.Count(&total).Error; err != nil {
+		e.logger.ErrorContext(reqCtx, "failed to count issue comments", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comments"})
 		return
 	}
@@ -391,7 +433,12 @@ func (e *Endpoint) GetIssueComments(c *gin.Context) {
 		})
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": out})
+	c.JSON(http.StatusOK, gin.H{"data": GetIssueCommentsPaginatedResponse{
+		Data:  out,
+		Total: int(total),
+		Page:  request.Page,
+		Limit: request.Limit,
+	}})
 }
 
 // [post] /issue/{id}/comments/{commentId}/upvote
@@ -423,6 +470,11 @@ func (e *Endpoint) UpvoteIssueComment(c *gin.Context) {
 		}
 		e.logger.ErrorContext(reqCtx, "failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
+		return
+	}
+
+	if issue.IsResolved {
+		c.JSON(http.StatusConflict, gin.H{"error": "Issue is resolved"})
 		return
 	}
 
@@ -491,6 +543,11 @@ func (e *Endpoint) UndoIssueCommentUpvote(c *gin.Context) {
 		return
 	}
 
+	if issue.IsResolved {
+		c.JSON(http.StatusConflict, gin.H{"error": "Issue is resolved"})
+		return
+	}
+
 	var comment model.IssueComment
 	if err := e.db.Where("id_external = ?", commentUUID).First(&comment).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -548,6 +605,11 @@ func (e *Endpoint) UpvoteIssue(c *gin.Context) {
 		return
 	}
 
+	if issue.IsResolved {
+		c.JSON(http.StatusConflict, gin.H{"error": "Issue is resolved"})
+		return
+	}
+
 	up := model.IssueUpvote{
 		IssueId: issue.IdIssue,
 		UserId:  userId,
@@ -592,6 +654,11 @@ func (e *Endpoint) UndoIssueUpvote(c *gin.Context) {
 		return
 	}
 
+	if issue.IsResolved {
+		c.JSON(http.StatusConflict, gin.H{"error": "Issue is resolved"})
+		return
+	}
+
 	res := e.db.Where("id_issue = ? AND id_user = ?", issue.IdIssue, userId).Delete(&model.IssueUpvote{})
 	if res.Error != nil {
 		e.logger.ErrorContext(reqCtx, "failed to remove issue upvote", "error", res.Error)
@@ -608,10 +675,16 @@ func (e *Endpoint) UndoIssueUpvote(c *gin.Context) {
 
 // [post] /issue/{id}/comments/{commentId}/comment
 func (e *Endpoint) CommentOnIssue(c *gin.Context) {
+	// Backward-compatible route. Delegates to CreateIssueComment.
+	e.CreateIssueComment(c)
+}
+
+// [post] /issue/{id}/comments
+func (e *Endpoint) CreateIssueComment(c *gin.Context) {
 	reqCtx := c.Request.Context()
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "CommentOnIssue")
+		e.logger.InfoContext(reqCtx, "unauthorized", "handler", "CreateIssueComment")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -621,15 +694,10 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid issue ID"})
 		return
 	}
-	commentUUID, err := uuid.Parse(c.Param("commentId"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid comment ID"})
-		return
-	}
 
 	var request CommentOnIssueRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		e.logger.WarnContext(reqCtx, "failed to bind JSON", "handler", "CommentOnIssue", "error", err)
+		e.logger.WarnContext(reqCtx, "failed to bind JSON", "handler", "CreateIssueComment", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
@@ -642,22 +710,6 @@ func (e *Endpoint) CommentOnIssue(c *gin.Context) {
 		}
 		e.logger.ErrorContext(reqCtx, "failed to load issue", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load issue"})
-		return
-	}
-
-	var anchor model.IssueComment
-	if err := e.db.Where("id_external = ?", commentUUID).First(&anchor).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Comment not found"})
-			return
-		}
-		e.logger.ErrorContext(reqCtx, "failed to load comment", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load comment"})
-		return
-	}
-
-	if anchor.IssueId != issue.IdIssue {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Comment not found"})
 		return
 	}
 

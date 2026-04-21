@@ -139,6 +139,7 @@ func main() {
 		protected.POST("/issue", issueEndpoint.CreateIssue)
 		protected.GET("/issue/:id", issueEndpoint.GetIssue)
 		protected.GET("/issue/:id/comments", issueEndpoint.GetIssueComments)
+		protected.POST("/issue/:id/comments", issueEndpoint.CreateIssueComment)
 		protected.POST("/issue/:id/upvote", issueEndpoint.UpvoteIssue)
 		protected.DELETE("/issue/:id/upvote", issueEndpoint.UndoIssueUpvote)
 		protected.POST("/issue/:id/comments/:commentId/upvote", issueEndpoint.UpvoteIssueComment)
