@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/SomtoJF/iris-api/model"
@@ -57,7 +58,9 @@ type GetIssueResponse struct {
 	Summary          string          `json:"summary"`
 	IsResolved       bool            `json:"isResolved"`
 	OwnerId          string          `json:"ownerId"`
+	OwnerEmail       string          `json:"ownerEmail"`
 	IsUserOwner      bool            `json:"isUserOwner"`
+	IsOwnerAdmin     bool            `json:"isOwnerAdmin"`
 	JobApplication   *jobApplication `json:"jobApplication,omitempty"`
 	UpvoteCount      int             `json:"upvoteCount"`
 	UserUpvoted      bool            `json:"userUpvoted"`
@@ -66,15 +69,17 @@ type GetIssueResponse struct {
 }
 
 type GetIssueCommentsResponse struct {
-	Id          string          `json:"id"`
-	CommentJSON json.RawMessage `json:"commentJson"`
-	CommentText string          `json:"commentText"`
-	OwnerId     string          `json:"ownerId"`
-	IsUserOwner bool            `json:"isUserOwner"`
-	UpvoteCount int             `json:"upvoteCount"`
-	UserUpvoted bool            `json:"userUpvoted"`
-	CreatedAt   time.Time       `json:"createdAt"`
-	UpdatedAt   time.Time       `json:"updatedAt"`
+	Id           string          `json:"id"`
+	CommentJSON  json.RawMessage `json:"commentJson"`
+	CommentText  string          `json:"commentText"`
+	OwnerId      string          `json:"ownerId"`
+	OwnerEmail   string          `json:"ownerEmail"`
+	IsUserOwner  bool            `json:"isUserOwner"`
+	IsOwnerAdmin bool            `json:"isOwnerAdmin"`
+	UpvoteCount  int             `json:"upvoteCount"`
+	UserUpvoted  bool            `json:"userUpvoted"`
+	CreatedAt    time.Time       `json:"createdAt"`
+	UpdatedAt    time.Time       `json:"updatedAt"`
 }
 
 type GetIssueCommentsRequest struct {
@@ -343,12 +348,27 @@ func (e *Endpoint) GetIssue(c *gin.Context) {
 		IsResolved:       issue.IsResolved,
 		OwnerId:          issue.User.IdExternal.String(),
 		IsUserOwner:      issue.UserId == userId,
+		IsOwnerAdmin:     issue.User.IsAdmin,
+		OwnerEmail:       truncateEmail(issue.User.Email),
 		JobApplication:   jobApplicationToDTO(issue.JobApplication),
 		UpvoteCount:      int(upCount),
 		UserUpvoted:      userUp,
 		CreatedAt:        issue.CreatedAt,
 		UpdatedAt:        issue.UpdatedAt,
 	})
+}
+
+func truncateEmail(email string) string {
+	atIdx := strings.Index(email, "@")
+	if atIdx == -1 || atIdx < 4 {
+		return email
+	}
+	local := email[:atIdx]
+	domain := email[atIdx:]
+	if len(local) < 5 {
+		return email // too short to truncate in the pattern
+	}
+	return local[:2] + "***" + local[len(local)-3:] + domain
 }
 
 // [get] /issue/{id}/comments
@@ -384,7 +404,7 @@ func (e *Endpoint) GetIssueComments(c *gin.Context) {
 	}
 
 	var issue model.Issue
-	if err := e.db.Where("id_external = ?", issueUUID).First(&issue).Error; err != nil {
+	if err := e.db.Where("id_external = ?", issueUUID).Preload("User").First(&issue).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Issue not found"})
 			return
@@ -419,15 +439,17 @@ func (e *Endpoint) GetIssueComments(c *gin.Context) {
 	for _, com := range comments {
 		upCount, userUp := e.commentUpvoteMeta(com.IdIssueComment, userId)
 		out = append(out, GetIssueCommentsResponse{
-			Id:          com.IdExternal.String(),
-			CommentJSON: com.CommentJSON,
-			CommentText: com.CommentText,
-			OwnerId:     com.User.IdExternal.String(),
-			IsUserOwner: com.UserId == userId,
-			UpvoteCount: int(upCount),
-			UserUpvoted: userUp,
-			CreatedAt:   com.CreatedAt,
-			UpdatedAt:   com.UpdatedAt,
+			Id:           com.IdExternal.String(),
+			CommentJSON:  com.CommentJSON,
+			CommentText:  com.CommentText,
+			OwnerId:      com.User.IdExternal.String(),
+			IsUserOwner:  com.UserId == userId,
+			IsOwnerAdmin: com.User.IsAdmin,
+			OwnerEmail:   truncateEmail(com.User.Email),
+			UpvoteCount:  int(upCount),
+			UserUpvoted:  userUp,
+			CreatedAt:    com.CreatedAt,
+			UpdatedAt:    com.UpdatedAt,
 		})
 	}
 
