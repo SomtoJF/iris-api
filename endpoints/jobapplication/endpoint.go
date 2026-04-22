@@ -122,8 +122,8 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 		return
 	}
 
-	// delete all user actions for this job application
-	if err := e.db.Where("id_job_application = ?", jobApplication.IdJobApplication).Delete(&model.UserAction{}).Error; err != nil {
+	// delete all pending user actions for this job application
+	if err := e.db.Where("id_job_application = ? AND is_pending = ?", jobApplication.IdJobApplication, true).Delete(&model.UserAction{}).Error; err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to delete user actions", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete user actions"})
 		return
