@@ -11,9 +11,8 @@ import (
 type UserActionType string
 
 const (
-	UserActionTypeCaptcha        = "captcha"
-	UserActionTypeAuthentication = "authentication"
-	UserActionTypeOTP            = "otp"
+	UserActionTypeAdditionalInfo = "USER_ACTION_ADDITIONAL_INFO"
+	UserActionTypeOTP            = "USER_ACTION_OTP"
 )
 
 type UserActionLayoutItem struct {
