@@ -152,13 +152,14 @@ type FetchAllJobApplicationsRequest struct {
 }
 
 type JobApplication struct {
-	Id          string                     `json:"id"`
-	Url         string                     `json:"url"`
-	JobTitle    string                     `json:"jobTitle"`
-	CompanyName string                     `json:"companyName"`
-	Status      model.JobApplicationStatus `json:"status"`
-	CreatedAt   time.Time                  `json:"createdAt"`
-	UpdatedAt   time.Time                  `json:"updatedAt"`
+	Id            string                     `json:"id"`
+	Url           string                     `json:"url"`
+	JobTitle      string                     `json:"jobTitle"`
+	CompanyName   string                     `json:"companyName"`
+	Status        model.JobApplicationStatus `json:"status"`
+	FailureReason *string                    `json:"failure_reason,omitempty"`
+	CreatedAt     time.Time                  `json:"createdAt"`
+	UpdatedAt     time.Time                  `json:"updatedAt"`
 }
 
 type FetchAllJobApplicationsResponse struct {
@@ -204,13 +205,14 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	applications := make([]JobApplication, 0, len(jobApplications))
 	for _, jobApplication := range jobApplications {
 		applications = append(applications, JobApplication{
-			Id:          jobApplication.IdExternal.String(),
-			Url:         jobApplication.Url,
-			JobTitle:    jobApplication.JobTitle,
-			CompanyName: jobApplication.CompanyName,
-			Status:      jobApplication.Status,
-			CreatedAt:   jobApplication.CreatedAt,
-			UpdatedAt:   jobApplication.UpdatedAt,
+			Id:            jobApplication.IdExternal.String(),
+			Url:           jobApplication.Url,
+			JobTitle:      jobApplication.JobTitle,
+			CompanyName:   jobApplication.CompanyName,
+			Status:        jobApplication.Status,
+			FailureReason: jobApplication.FailureReason,
+			CreatedAt:     jobApplication.CreatedAt,
+			UpdatedAt:     jobApplication.UpdatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": FetchAllJobApplicationsResponse{
