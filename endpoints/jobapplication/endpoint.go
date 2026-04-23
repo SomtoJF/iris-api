@@ -122,13 +122,6 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 		return
 	}
 
-	// delete all pending user actions for this job application
-	if err := e.db.Where("id_job_application = ? AND is_pending = ?", jobApplication.IdJobApplication, true).Delete(&model.UserAction{}).Error; err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to delete user actions", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete user actions"})
-		return
-	}
-
 	workflowOptions := client.StartWorkflowOptions{
 		ID:                       fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String()),
 		TaskQueue:                string(e.taskQueueName),
@@ -164,7 +157,7 @@ type JobApplication struct {
 	JobTitle      string                     `json:"jobTitle"`
 	CompanyName   string                     `json:"companyName"`
 	Status        model.JobApplicationStatus `json:"status"`
-	FailureReason *string                    `json:"failure_reason,omitempty"`
+	FailureReason *string                    `json:"failureReason,omitempty"`
 	CreatedAt     time.Time                  `json:"createdAt"`
 	UpdatedAt     time.Time                  `json:"updatedAt"`
 }
