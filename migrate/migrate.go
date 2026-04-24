@@ -86,14 +86,16 @@ func main() {
 func dropAllApplicationTables() {
 	log.Println("Dropping existing application tables (if any)")
 	tables := []interface{}{
-		// &model.CostTracking{},
-		// &model.UserAction{},
+		&model.CostTracking{},
+		&model.UserAction{},
 		// &model.Resume{},
-		// &model.JobApplication{},
+		&model.JobApplication{},
 		// &model.JobApplicationProfile{},
 		// &model.User{},
-		// &model.Issue{},
+		&model.IssueCommentUpvote{},
+		&model.IssueUpvote{},
 		&model.IssueComment{},
+		&model.Issue{},
 		// &model.IssueCommentUpvote{},
 		// &model.IssueUpvote{},
 	}
