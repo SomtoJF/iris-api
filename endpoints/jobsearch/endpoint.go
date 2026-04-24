@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SomtoJF/iris-api/model"
 	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -82,6 +83,7 @@ type discoveredJobJSON struct {
 	Url         string `json:"url"`
 	CompanyName string `json:"companyName"`
 	DatePosted  string `json:"datePosted"`
+	Applied     bool   `json:"applied"`
 }
 
 // JobSearchHistoryEntryJSON is one history row for API and Redis list v2 (camelCase JSON).
@@ -92,7 +94,7 @@ type JobSearchHistoryEntryJSON struct {
 	RequestedAt time.Time `json:"requestedAt"`
 }
 
-func jobDiscoveryOutputToResponse(out JobDiscoveryWorkflowOutput) jobSearchResponse {
+func jobDiscoveryOutputToResponse(out JobDiscoveryWorkflowOutput, appliedUrls map[string]bool) jobSearchResponse {
 	jobs := make([]discoveredJobJSON, 0, len(out.Jobs))
 	for _, j := range out.Jobs {
 		jobs = append(jobs, discoveredJobJSON{
@@ -100,9 +102,34 @@ func jobDiscoveryOutputToResponse(out JobDiscoveryWorkflowOutput) jobSearchRespo
 			Url:         j.Url,
 			CompanyName: j.CompanyName,
 			DatePosted:  j.DatePosted,
+			Applied:     appliedUrls[j.Url],
 		})
 	}
 	return jobSearchResponse{Jobs: jobs}
+}
+
+func (e *Endpoint) getAppliedUrls(ctx context.Context, userId uint, urls []string) map[string]bool {
+	if len(urls) == 0 {
+		return nil
+	}
+	var appliedUrls []string
+	if err := e.db.Model(&model.JobApplication{}).Where("id_user = ? AND url IN ?", userId, urls).Pluck("url", &appliedUrls).Error; err != nil {
+		e.logger.ErrorContext(ctx, "failed to query applied urls", "error", err)
+		return nil
+	}
+	m := make(map[string]bool, len(appliedUrls))
+	for _, u := range appliedUrls {
+		m[u] = true
+	}
+	return m
+}
+
+func extractUrls(jobs []DiscoveredJob) []string {
+	urls := make([]string, 0, len(jobs))
+	for _, j := range jobs {
+		urls = append(urls, j.Url)
+	}
+	return urls
 }
 
 func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
@@ -129,7 +156,8 @@ func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 
 	cacheKey := jobSearchCacheKey(userId, searchQuery, location, dateCutoff)
 	if cached, ok := e.tryGetJobSearchFromCache(c.Request.Context(), cacheKey); ok {
-		c.JSON(http.StatusOK, jobDiscoveryOutputToResponse(cached))
+		appliedUrls := e.getAppliedUrls(c.Request.Context(), userId, extractUrls(cached.Jobs))
+		c.JSON(http.StatusOK, jobDiscoveryOutputToResponse(cached, appliedUrls))
 		return
 	}
 
@@ -163,7 +191,8 @@ func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 	e.setJobSearchCache(c.Request.Context(), cacheKey, output)
 	e.appendJobSearchHistory(c.Request.Context(), userId, searchQuery, location, dateCutoff)
 
-	c.JSON(http.StatusOK, jobDiscoveryOutputToResponse(output))
+	appliedUrls := e.getAppliedUrls(c.Request.Context(), userId, extractUrls(output.Jobs))
+	c.JSON(http.StatusOK, jobDiscoveryOutputToResponse(output, appliedUrls))
 }
 
 func (e *Endpoint) GetJobSearchHistory(c *gin.Context) {
