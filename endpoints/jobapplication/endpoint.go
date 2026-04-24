@@ -128,7 +128,7 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 	workflowOptions := client.StartWorkflowOptions{
 		ID:                       fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String()),
 		TaskQueue:                string(e.taskQueueName),
-		WorkflowExecutionTimeout: 40 * time.Minute,
+		WorkflowExecutionTimeout: 25 * time.Hour,
 		WorkflowTaskTimeout:      1 * time.Minute,
 	}
 

@@ -369,7 +369,8 @@ func (e *Endpoint) isOnboardingComplete(userID uint) bool {
 	// Required onboarding fields (extra)
 	if profile.IsOpenToRelocating == nil || profile.NoticePeriodDays == nil ||
 		len(profile.PreferredWorkingArrangement) == 0 ||
-		len(profile.LanguageProficiencies) == 0 {
+		len(profile.LanguageProficiencies) == 0 ||
+		profile.LinkedInUrl == nil {
 		return false
 	}
 

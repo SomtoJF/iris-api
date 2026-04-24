@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/SomtoJF/iris-api/model"
@@ -42,6 +43,7 @@ type UpsertJobApplicationProfileRequest struct {
 	Ethnicity                   string                      `json:"ethnicity"`
 	IsOpenToRelocating          *bool                       `json:"isOpenToRelocating"`
 	NoticePeriodDays            *int                        `json:"noticePeriodDays"`
+	LinkedInUrl                 string                      `json:"linkedinUrl" binding:"required"`
 	PreferredWorkingArrangement []string                    `json:"preferredWorkingArrangement"`
 	LanguageProficiencies       model.LanguageProficiencies `json:"languageProficiencies"`
 	PortfolioLink               *string                     `json:"portfolioLink"`
@@ -68,6 +70,7 @@ type GetJobApplicationProfileResponse struct {
 	Ethnicity                   string                      `json:"ethnicity"`
 	IsOpenToRelocating          *bool                       `json:"isOpenToRelocating"`
 	NoticePeriodDays            *int                        `json:"noticePeriodDays"`
+	LinkedInUrl                 *string                     `json:"linkedinUrl"`
 	PreferredWorkingArrangement []string                    `json:"preferredWorkingArrangement"`
 	LanguageProficiencies       model.LanguageProficiencies `json:"languageProficiencies"`
 	PortfolioLink               *string                     `json:"portfolioLink"`
@@ -110,6 +113,7 @@ func (e *Endpoint) GetJobApplicationProfile(c *gin.Context) {
 		Ethnicity:                   jobApplicationProfile.Ethnicity,
 		IsOpenToRelocating:          jobApplicationProfile.IsOpenToRelocating,
 		NoticePeriodDays:            jobApplicationProfile.NoticePeriodDays,
+		LinkedInUrl:                 jobApplicationProfile.LinkedInUrl,
 		PreferredWorkingArrangement: []string(jobApplicationProfile.PreferredWorkingArrangement),
 		LanguageProficiencies:       jobApplicationProfile.LanguageProficiencies,
 		PortfolioLink:               jobApplicationProfile.PortfolioLink,
@@ -150,6 +154,8 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 		return
 	}
 
+	cleanedLinkedIn := cleanupLinkedInUrl(input.LinkedInUrl)
+
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		jobApplicationProfile = model.JobApplicationProfile{
 			UserId:                      userId,
@@ -173,6 +179,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 			IsOpenToRelocating:          input.IsOpenToRelocating,
 			NoticePeriodDays:            input.NoticePeriodDays,
 			PreferredWorkingArrangement: pq.StringArray(input.PreferredWorkingArrangement),
+			LinkedInUrl:                 &cleanedLinkedIn,
 			LanguageProficiencies:       input.LanguageProficiencies,
 			PortfolioLink:               input.PortfolioLink,
 		}
@@ -210,6 +217,7 @@ func (e *Endpoint) UpsertJobApplicationProfile(c *gin.Context) {
 	jobApplicationProfile.PreferredWorkingArrangement = pq.StringArray(input.PreferredWorkingArrangement)
 	jobApplicationProfile.LanguageProficiencies = input.LanguageProficiencies
 	jobApplicationProfile.PortfolioLink = input.PortfolioLink
+	jobApplicationProfile.LinkedInUrl = &cleanedLinkedIn
 
 	if err := e.db.Save(&jobApplicationProfile).Error; err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to update job application profile", "error", err)
@@ -243,6 +251,7 @@ type PatchJobApplicationProfileRequest struct {
 	Ethnicity                   *string                      `json:"ethnicity"`
 	IsOpenToRelocating          *bool                        `json:"isOpenToRelocating"`
 	NoticePeriodDays            *int                         `json:"noticePeriodDays"`
+	LinkedInUrl                 *string                      `json:"linkedinUrl"`
 	PreferredWorkingArrangement *[]string                    `json:"preferredWorkingArrangement"`
 	LanguageProficiencies       *model.LanguageProficiencies `json:"languageProficiencies"`
 	PortfolioLink               *string                      `json:"portfolioLink"`
@@ -317,6 +326,7 @@ func (e *Endpoint) PatchJobApplicationProfile(c *gin.Context) {
 			Ethnicity:                   profile.Ethnicity,
 			IsOpenToRelocating:          profile.IsOpenToRelocating,
 			NoticePeriodDays:            profile.NoticePeriodDays,
+			LinkedInUrl:                 profile.LinkedInUrl,
 			PreferredWorkingArrangement: []string(profile.PreferredWorkingArrangement),
 			LanguageProficiencies:       profile.LanguageProficiencies,
 			PortfolioLink:               profile.PortfolioLink,
@@ -380,6 +390,9 @@ func buildProfileUpdateMap(input PatchJobApplicationProfileRequest) map[string]i
 	if input.NoticePeriodDays != nil {
 		updates["notice_period_days"] = *input.NoticePeriodDays
 	}
+	if input.LinkedInUrl != nil {
+		updates["linkedin_url"] = cleanupLinkedInUrl(*input.LinkedInUrl)
+	}
 	if input.PreferredWorkingArrangement != nil {
 		updates["preferred_working_arrangement"] = pq.StringArray(*input.PreferredWorkingArrangement)
 	}
@@ -390,6 +403,12 @@ func buildProfileUpdateMap(input PatchJobApplicationProfileRequest) map[string]i
 		updates["portfolio_link"] = *input.PortfolioLink
 	}
 	return updates
+}
+
+func cleanupLinkedInUrl(url string) string {
+	url = strings.TrimRight(url, "/")
+	url = strings.Replace(url, "https://www.", "https://", 1)
+	return url
 }
 
 func parseDateOfBirth(s string) (time.Time, error) {
