@@ -116,9 +116,12 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 		return
 	}
 
-	if err := e.db.Model(&jobApplication).Update("status", model.JobApplicationStatusPending).Error; err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to update job application status", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application status"})
+	if err := e.db.Model(&jobApplication).Updates(map[string]any{
+		"status":     model.JobApplicationStatusPending,
+		"created_at": time.Now(),
+	}).Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to update job application on retry", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
 		return
 	}
 
