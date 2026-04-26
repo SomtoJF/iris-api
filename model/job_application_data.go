@@ -19,7 +19,7 @@ type JobApplicationData struct {
 	User                 User                      `gorm:"foreignKey:UserId;references:IdUser"`
 	ResumeId             uint                      `gorm:"column:id_resume;not null"`
 	Resume               Resume                    `gorm:"foreignKey:ResumeId;references:IdResume"`
-	JobApplicationId     uint                      `gorm:"column:id_job_application;not null"`
+	JobApplicationId     uint                      `gorm:"column:id_job_application;not null;uniqueIndex"`
 	JobApplication       JobApplication            `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
 	CoverLetter          *string                   `gorm:"type:text"`
 	Questions            []JobApplicationQuestions `gorm:"type:jsonb;not null"`

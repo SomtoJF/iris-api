@@ -53,6 +53,8 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		return
 	}
 
+	workflowId := fmt.Sprintf("job-application-%s-%s", request.Url, uuid.New().String())
+
 	jobApplication := model.JobApplication{
 		Url:            request.Url,
 		JobTitle:       "Pending-Job-Title",
@@ -60,6 +62,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		JobDescription: "Pending-Job-Description",
 		Status:         model.JobApplicationStatusPending,
 		UserId:         userId,
+		WorkflowID:     &workflowId,
 	}
 	if err := e.db.Create(&jobApplication).Error; err != nil {
 		if errors.Is(err, gorm.ErrDuplicatedKey) {
@@ -73,7 +76,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	}
 
 	workflowOptions := client.StartWorkflowOptions{
-		ID:                       fmt.Sprintf("job-application-%s-%s", request.Url, uuid.New().String()),
+		ID:                       workflowId,
 		TaskQueue:                string(e.taskQueueName),
 		WorkflowExecutionTimeout: 40 * time.Minute,
 		WorkflowTaskTimeout:      1 * time.Minute,
@@ -116,9 +119,12 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 		return
 	}
 
+	workflowId := fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String())
+
 	if err := e.db.Model(&jobApplication).Updates(map[string]any{
-		"status":     model.JobApplicationStatusPending,
-		"created_at": time.Now(),
+		"status":      model.JobApplicationStatusPending,
+		"workflow_id": &workflowId,
+		"created_at":  time.Now(),
 	}).Error; err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to update job application on retry", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
@@ -126,7 +132,7 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 	}
 
 	workflowOptions := client.StartWorkflowOptions{
-		ID:                       fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String()),
+		ID:                       workflowId,
 		TaskQueue:                string(e.taskQueueName),
 		WorkflowExecutionTimeout: 25 * time.Hour,
 		WorkflowTaskTimeout:      1 * time.Minute,
@@ -155,14 +161,15 @@ type FetchAllJobApplicationsRequest struct {
 }
 
 type JobApplication struct {
-	Id            string                     `json:"id"`
-	Url           string                     `json:"url"`
-	JobTitle      string                     `json:"jobTitle"`
-	CompanyName   string                     `json:"companyName"`
-	Status        model.JobApplicationStatus `json:"status"`
-	FailureReason *string                    `json:"failureReason,omitempty"`
-	CreatedAt     time.Time                  `json:"createdAt"`
-	UpdatedAt     time.Time                  `json:"updatedAt"`
+	Id                 string                     `json:"id"`
+	Url                string                     `json:"url"`
+	JobTitle           string                     `json:"jobTitle"`
+	CompanyName        string                     `json:"companyName"`
+	Status             model.JobApplicationStatus `json:"status"`
+	HasApplicationData bool                       `json:"hasApplicationData"`
+	FailureReason      *string                    `json:"failureReason,omitempty"`
+	CreatedAt          time.Time                  `json:"createdAt"`
+	UpdatedAt          time.Time                  `json:"updatedAt"`
 }
 
 type FetchAllJobApplicationsResponse struct {
@@ -187,7 +194,9 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 		return
 	}
 
-	baseQuery := e.db.Model(&model.JobApplication{}).Where("id_user = ?", userId)
+	baseQuery := e.db.Model(&model.JobApplication{}).
+		Where("id_user = ?", userId).
+		Preload("JobApplicationData")
 	if request.Search != "" {
 		baseQuery = baseQuery.Where("job_title LIKE ? OR company_name LIKE ?", "%"+request.Search+"%", "%"+request.Search+"%")
 	}
@@ -208,14 +217,15 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	applications := make([]JobApplication, 0, len(jobApplications))
 	for _, jobApplication := range jobApplications {
 		applications = append(applications, JobApplication{
-			Id:            jobApplication.IdExternal.String(),
-			Url:           jobApplication.Url,
-			JobTitle:      jobApplication.JobTitle,
-			CompanyName:   jobApplication.CompanyName,
-			Status:        jobApplication.Status,
-			FailureReason: jobApplication.FailureReason,
-			CreatedAt:     jobApplication.CreatedAt,
-			UpdatedAt:     jobApplication.UpdatedAt,
+			Id:                 jobApplication.IdExternal.String(),
+			Url:                jobApplication.Url,
+			JobTitle:           jobApplication.JobTitle,
+			CompanyName:        jobApplication.CompanyName,
+			Status:             jobApplication.Status,
+			HasApplicationData: jobApplication.JobApplicationData != nil,
+			FailureReason:      jobApplication.FailureReason,
+			CreatedAt:          jobApplication.CreatedAt,
+			UpdatedAt:          jobApplication.UpdatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": FetchAllJobApplicationsResponse{
