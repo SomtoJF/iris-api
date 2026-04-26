@@ -49,8 +49,13 @@ func main() {
 	// 	log.Fatal(err)
 	// }
 
-	log.Println("Starting migration on table job application profile")
-	if err := db.AutoMigrate(&model.JobApplicationProfile{}); err != nil {
+	// log.Println("Starting migration on table job application profile")
+	// if err := db.AutoMigrate(&model.JobApplicationProfile{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+
+	log.Println("Starting migration on table job application data")
+	if err := db.AutoMigrate(&model.JobApplicationData{}); err != nil {
 		log.Fatal(err)
 	}
 
