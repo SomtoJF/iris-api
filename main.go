@@ -12,6 +12,7 @@ import (
 	"github.com/SomtoJF/iris-api/endpoints/health"
 	"github.com/SomtoJF/iris-api/endpoints/issue"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplication"
+	"github.com/SomtoJF/iris-api/endpoints/jobapplicationdata"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplicationprofile"
 	"github.com/SomtoJF/iris-api/endpoints/jobsearch"
 	realtimeeventsse "github.com/SomtoJF/iris-api/endpoints/realtimeeventssse"
@@ -95,6 +96,7 @@ func main() {
 	workflowEndpoint := workflowendpoint.NewEndpoint(temporalClient, logger)
 	costTrackingEndpoint := costtracking.NewEndpoint(db)
 	issueEndpoint := issue.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
+	jobApplicationDataEndpoint := jobapplicationdata.NewEndpoint(db, logger)
 
 	authMiddleware := verifyauth.NewMiddleware(db)
 
@@ -120,6 +122,7 @@ func main() {
 		protected.POST("/jobs/:id/retry-application", jobEndpoint.RetryApplication)
 		protected.GET("/jobs/:id/user-action", jobEndpoint.GetUserAction)
 		protected.GET("/jobs", jobEndpoint.FetchAllJobApplications)
+		protected.GET("/jobs/:id/application-data", jobApplicationDataEndpoint.GetJobApplicationData)
 		protected.GET("/jobs/search/history", jobSearchEndpoint.GetJobSearchHistory)
 		protected.POST("/jobs/search", jobSearchEndpoint.TriggerJobSearch)
 

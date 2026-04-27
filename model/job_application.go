@@ -11,8 +11,9 @@ type JobApplicationStatus string
 const (
 	JobApplicationStatusPending JobApplicationStatus = "processing"
 	JobApplicationStatusApplied JobApplicationStatus = "applied"
-	JobApplicationStatusFailed  JobApplicationStatus = "failed"
-	JobApplicationStatusBlocked JobApplicationStatus = "blocked"
+	JobApplicationStatusFailed    JobApplicationStatus = "failed"
+	JobApplicationStatusBlocked   JobApplicationStatus = "blocked"
+	JobApplicationStatusCancelled JobApplicationStatus = "cancelled"
 )
 
 type JobApplication struct {
@@ -24,7 +25,8 @@ type JobApplication struct {
 	Status             JobApplicationStatus `gorm:"type:varchar(50);not null"`
 	WorkflowID         *string              `gorm:"type:text;default:NULL"`
 
-	FailureReason  *string    `gorm:"type:text;default:NULL"`
+	FailureReason      *string    `gorm:"type:text;default:NULL"`
+	CancellationReason *string    `gorm:"type:text;default:NULL"`
 	JobTitle       string     `gorm:"type:varchar(255);not null"`
 	CompanyName    string     `gorm:"type:varchar(255);not null"`
 	JobDescription string     `gorm:"type:text;not null"`
