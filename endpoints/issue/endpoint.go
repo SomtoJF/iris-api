@@ -100,11 +100,13 @@ type CommentOnIssueRequest struct {
 }
 
 type FetchIssuesRequest struct {
-	Page     int    `form:"page" binding:"required"`
-	Limit    int    `form:"limit" binding:"required"`
+	Page     int    `form:"page"`
+	Limit    int    `form:"limit"`
 	Search   string `form:"search"`
 	Type     string `form:"type"`
 	Resolved *bool  `form:"resolved"`
+	Sort     string `form:"sort"`   // "upvotes_desc" | "upvotes_asc"
+	Filter   string `form:"filter"` // "hot" | "mine"
 }
 
 type IssueListItem struct {
@@ -112,8 +114,10 @@ type IssueListItem struct {
 	Title        string    `json:"title"`
 	Type         string    `json:"type"`
 	Summary      string    `json:"summary"`
+	ContentText  string    `json:"contentText"`
 	IsResolved   bool      `json:"isResolved"`
 	UpvoteCount  int       `json:"upvoteCount"`
+	UserUpvoted  bool      `json:"userUpvoted"`
 	CommentCount int       `json:"commentCount"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
@@ -233,6 +237,16 @@ func (e *Endpoint) FetchIssues(c *gin.Context) {
 		return
 	}
 
+	if request.Page < 1 {
+		request.Page = 1
+	}
+	if request.Limit < 1 {
+		request.Limit = 20
+	}
+	if request.Limit > 100 {
+		request.Limit = 100
+	}
+
 	baseQuery := e.db.Model(&model.Issue{})
 	if request.Resolved != nil {
 		baseQuery = baseQuery.Where("is_resolved = ?", *request.Resolved)
@@ -242,18 +256,25 @@ func (e *Endpoint) FetchIssues(c *gin.Context) {
 	}
 	if request.Search != "" {
 		like := "%" + request.Search + "%"
-		baseQuery = baseQuery.Where("title LIKE ? OR summary LIKE ?", like, like)
+		baseQuery = baseQuery.Where("title ILIKE ? OR summary ILIKE ?", like, like)
+	}
+	if request.Filter == "mine" {
+		baseQuery = baseQuery.Where("id_user = ?", userId)
 	}
 
-	var issues []model.Issue
-	if err := baseQuery.
-		Order("created_at DESC").
-		Limit(request.Limit).
-		Offset((request.Page - 1) * request.Limit).
-		Find(&issues).Error; err != nil {
-		e.logger.ErrorContext(reqCtx, "failed to fetch issues", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch issues"})
-		return
+	// Determine ordering
+	var orderClause string
+	if request.Filter == "hot" {
+		orderClause = "(SELECT COUNT(*) FROM issue_comments WHERE issue_comments.id_issue = issue.id_issue AND issue_comments.created_at > NOW() - INTERVAL '7 days' AND issue_comments.deleted_at IS NULL) DESC"
+	} else {
+		switch request.Sort {
+		case "upvotes_asc":
+			orderClause = "(SELECT COUNT(*) FROM issue_upvote WHERE issue_upvote.id_issue = issue.id_issue) ASC"
+		case "upvotes_desc":
+			orderClause = "(SELECT COUNT(*) FROM issue_upvote WHERE issue_upvote.id_issue = issue.id_issue) DESC"
+		default:
+			orderClause = "issue.created_at DESC"
+		}
 	}
 
 	var total int64
@@ -263,13 +284,23 @@ func (e *Endpoint) FetchIssues(c *gin.Context) {
 		return
 	}
 
+	var issues []model.Issue
+	if err := baseQuery.
+		Order(orderClause).
+		Limit(request.Limit).
+		Offset((request.Page - 1) * request.Limit).
+		Find(&issues).Error; err != nil {
+		e.logger.ErrorContext(reqCtx, "failed to fetch issues", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch issues"})
+		return
+	}
+
 	out := make([]IssueListItem, 0, len(issues))
 	for _, issue := range issues {
 		var commentCount int64
 		e.db.Model(&model.IssueComment{}).Where("id_issue = ?", issue.IdIssue).Count(&commentCount)
 
-		var upvoteCount int64
-		e.db.Model(&model.IssueUpvote{}).Where("id_issue = ?", issue.IdIssue).Count(&upvoteCount)
+		upvoteCount, userUpvoted := e.issueUpvoteMeta(issue.IdIssue, userId)
 
 		summary := ""
 		if issue.Summary != nil {
@@ -281,8 +312,10 @@ func (e *Endpoint) FetchIssues(c *gin.Context) {
 			Title:        issue.Title,
 			Type:         string(issue.Type),
 			Summary:      summary,
+			ContentText:  issue.ContentText,
 			IsResolved:   issue.IsResolved,
 			UpvoteCount:  int(upvoteCount),
+			UserUpvoted:  userUpvoted,
 			CommentCount: int(commentCount),
 			CreatedAt:    issue.CreatedAt,
 			UpdatedAt:    issue.UpdatedAt,

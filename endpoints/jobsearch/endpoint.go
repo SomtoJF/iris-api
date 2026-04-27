@@ -156,6 +156,9 @@ func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 
 	cacheKey := jobSearchCacheKey(userId, searchQuery, location, dateCutoff)
 	if cached, ok := e.tryGetJobSearchFromCache(c.Request.Context(), cacheKey); ok {
+		// Cache hit still counts as the most recent search (but we dedupe).
+		e.upsertJobSearchHistory(c.Request.Context(), userId, searchQuery, location, dateCutoff)
+
 		appliedUrls := e.getAppliedUrls(c.Request.Context(), userId, extractUrls(cached.Jobs))
 		c.JSON(http.StatusOK, jobDiscoveryOutputToResponse(cached, appliedUrls))
 		return
@@ -189,7 +192,7 @@ func (e *Endpoint) TriggerJobSearch(c *gin.Context) {
 	}
 
 	e.setJobSearchCache(c.Request.Context(), cacheKey, output)
-	e.appendJobSearchHistory(c.Request.Context(), userId, searchQuery, location, dateCutoff)
+	e.upsertJobSearchHistory(c.Request.Context(), userId, searchQuery, location, dateCutoff)
 
 	appliedUrls := e.getAppliedUrls(c.Request.Context(), userId, extractUrls(output.Jobs))
 	c.JSON(http.StatusOK, jobDiscoveryOutputToResponse(output, appliedUrls))
@@ -245,8 +248,10 @@ func jobSearchHistoryKey(userId uint) string {
 	return fmt.Sprintf("%shistory:v2:%d", REDIS_JOB_SEARCH_KEY_PREFIX, userId)
 }
 
-// appendJobSearchHistory records a successful search request (LPUSH: newest first). Fail-open.
-func (e *Endpoint) appendJobSearchHistory(ctx context.Context, userId uint, searchQuery, location, dateCutoff string) {
+// upsertJobSearchHistory records a successful search request (newest-first) while
+// removing any existing matching entry (dedupe by searchQuery+location+dateCutoff).
+// Fail-open: on any Redis/unmarshal errors it logs and returns without affecting request.
+func (e *Endpoint) upsertJobSearchHistory(ctx context.Context, userId uint, searchQuery, location, dateCutoff string) {
 	if e.redis == nil {
 		return
 	}
@@ -262,15 +267,48 @@ func (e *Endpoint) appendJobSearchHistory(ctx context.Context, userId uint, sear
 		return
 	}
 	key := jobSearchHistoryKey(userId)
-	if err := e.redis.LPush(ctx, key, payload).Err(); err != nil {
-		e.logger.ErrorContext(ctx, "job search history redis LPUSH failed", "error", err)
+
+	// Load existing list (newest-first) and drop duplicates by fingerprint.
+	raw, err := e.redis.LRange(ctx, key, 0, -1).Result()
+	if err != nil {
+		e.logger.ErrorContext(ctx, "job search history redis LRANGE failed", "error", err)
 		return
 	}
-	if err := e.redis.LTrim(ctx, key, 0, int64(JOB_SEARCH_HISTORY_MAX_ENTRIES-1)).Err(); err != nil {
-		e.logger.ErrorContext(ctx, "job search history redis LTRIM failed", "error", err)
+
+	kept := make([]string, 0, len(raw))
+	for i, s := range raw {
+		var existing JobSearchHistoryEntryJSON
+		if err := json.Unmarshal([]byte(s), &existing); err != nil {
+			// If we can't parse an element, keep it to avoid destructive behavior.
+			e.logger.ErrorContext(ctx, "job search history corrupt list element", "index", i, "error", err)
+			kept = append(kept, s)
+			continue
+		}
+		if existing.SearchQuery == searchQuery && existing.Location == location && existing.DateCutoff == dateCutoff {
+			continue
+		}
+		kept = append(kept, s)
 	}
-	if err := e.redis.Expire(ctx, key, REDIS_JOB_SEARCH_TTL).Err(); err != nil {
-		e.logger.ErrorContext(ctx, "job search history redis EXPIRE failed", "error", err)
+
+	// Rebuild list with the new entry at the head.
+	toWrite := make([]any, 0, 1+len(kept))
+	toWrite = append(toWrite, string(payload))
+	for _, s := range kept {
+		toWrite = append(toWrite, s)
+	}
+	if len(toWrite) > JOB_SEARCH_HISTORY_MAX_ENTRIES {
+		toWrite = toWrite[:JOB_SEARCH_HISTORY_MAX_ENTRIES]
+	}
+
+	pipe := e.redis.TxPipeline()
+	pipe.Del(ctx, key)
+	if len(toWrite) > 0 {
+		pipe.RPush(ctx, key, toWrite...)
+	}
+	pipe.Expire(ctx, key, REDIS_JOB_SEARCH_TTL)
+	if _, err := pipe.Exec(ctx); err != nil {
+		e.logger.ErrorContext(ctx, "job search history redis rebuild failed", "error", err)
+		return
 	}
 }
 
