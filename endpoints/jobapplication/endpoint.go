@@ -245,6 +245,70 @@ type UserActionResponse struct {
 	SignalName     string                 `json:"signal_name"`
 }
 
+type CancelApplicationRequest struct {
+	Reason *string `json:"reason"`
+}
+
+type CancelSignalPayload struct {
+	Reason string `json:"reason"`
+}
+
+func (e *Endpoint) CancelApplication(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		return
+	}
+
+	var req CancelApplicationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var jobApplication model.JobApplication
+	if err := e.db.Where("id_external = ? AND id_user = ?", id, userId).First(&jobApplication).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+		return
+	}
+
+	if jobApplication.Status != model.JobApplicationStatusPending {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Application is not currently processing"})
+		return
+	}
+
+	if jobApplication.WorkflowID == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No workflow associated with this application"})
+		return
+	}
+
+	reason := ""
+	if req.Reason != nil {
+		reason = *req.Reason
+	}
+
+	err = e.temporalClient.SignalWorkflow(
+		context.Background(),
+		*jobApplication.WorkflowID,
+		"",
+		"CANCEL_APPLICATION",
+		CancelSignalPayload{Reason: reason},
+	)
+	if err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to signal workflow for cancellation", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel application"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Application cancellation initiated"})
+}
+
 func (e *Endpoint) GetUserAction(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {

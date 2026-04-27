@@ -120,6 +120,7 @@ func main() {
 
 		protected.POST("/jobs/apply", jobEndpoint.ApplyForJob)
 		protected.POST("/jobs/:id/retry-application", jobEndpoint.RetryApplication)
+		protected.POST("/jobs/:id/cancel", jobEndpoint.CancelApplication)
 		protected.GET("/jobs/:id/user-action", jobEndpoint.GetUserAction)
 		protected.GET("/jobs", jobEndpoint.FetchAllJobApplications)
 		protected.GET("/jobs/:id/application-data", jobApplicationDataEndpoint.GetJobApplicationData)
