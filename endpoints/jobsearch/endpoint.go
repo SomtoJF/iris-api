@@ -113,7 +113,7 @@ func (e *Endpoint) getAppliedUrls(ctx context.Context, userId uint, urls []strin
 		return nil
 	}
 	var appliedUrls []string
-	if err := e.db.Model(&model.JobApplication{}).Where("id_user = ? AND url IN ?", userId, urls).Pluck("url", &appliedUrls).Error; err != nil {
+	if err := e.db.Model(&model.JobApplication{}).Where("id_user = ? AND url IN ? AND deleted_at IS NULL", userId, urls).Pluck("url", &appliedUrls).Error; err != nil {
 		e.logger.ErrorContext(ctx, "failed to query applied urls", "error", err)
 		return nil
 	}

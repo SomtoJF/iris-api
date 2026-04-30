@@ -220,7 +220,7 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	}
 
 	baseQuery := e.db.Model(&model.JobApplication{}).
-		Where("id_user = ?", userId).
+		Where("id_user = ? AND deleted_at IS NULL", userId).
 		Preload("JobApplicationData")
 	if request.Search != "" {
 		baseQuery = baseQuery.Where("job_title LIKE ? OR company_name LIKE ?", "%"+request.Search+"%", "%"+request.Search+"%")
@@ -333,6 +333,46 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Application cancellation initiated"})
+}
+
+func (e *Endpoint) DeleteApplication(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "DeleteApplication")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		return
+	}
+
+	var jobApplication model.JobApplication
+	if err := e.db.Where("id_external = ? AND id_user = ? AND deleted_at IS NULL", id, userId).First(&jobApplication).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+			return
+		}
+		e.logger.ErrorContext(c.Request.Context(), "failed to load job application for deletion", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load job application"})
+		return
+	}
+
+	if jobApplication.Status != model.JobApplicationStatusFailed && jobApplication.Status != model.JobApplicationStatusCancelled {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only failed or cancelled applications can be deleted"})
+		return
+	}
+
+	now := time.Now()
+	if err := e.db.Model(&jobApplication).Update("deleted_at", &now).Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to delete job application", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete job application"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Job application deleted"})
 }
 
 func (e *Endpoint) GetUserAction(c *gin.Context) {
