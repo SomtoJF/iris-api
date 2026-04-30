@@ -170,6 +170,7 @@ type JobApplication struct {
 	Status             model.JobApplicationStatus `json:"status"`
 	HasApplicationData bool                       `json:"hasApplicationData"`
 	FailureReason      *string                    `json:"failureReason,omitempty"`
+	CancellationReason *string                    `json:"cancellationReason,omitempty"`
 	CreatedAt          time.Time                  `json:"createdAt"`
 	UpdatedAt          time.Time                  `json:"updatedAt"`
 }
@@ -226,6 +227,7 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 			Status:             jobApplication.Status,
 			HasApplicationData: jobApplication.JobApplicationData != nil,
 			FailureReason:      jobApplication.FailureReason,
+			CancellationReason: jobApplication.CancellationReason,
 			CreatedAt:          jobApplication.CreatedAt,
 			UpdatedAt:          jobApplication.UpdatedAt,
 		})
