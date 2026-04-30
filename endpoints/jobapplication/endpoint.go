@@ -38,6 +38,8 @@ type JobApplicationWorkflowInput struct {
 	ApplicationExternalId string `json:"application_external_id"`
 }
 
+const JOB_APPLICATION_TIMEOUT = 24 * time.Hour
+
 func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
@@ -78,7 +80,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	workflowOptions := client.StartWorkflowOptions{
 		ID:                       workflowId,
 		TaskQueue:                string(e.taskQueueName),
-		WorkflowExecutionTimeout: 24 * time.Hour,
+		WorkflowExecutionTimeout: JOB_APPLICATION_TIMEOUT,
 		WorkflowTaskTimeout:      1 * time.Minute,
 	}
 
@@ -134,7 +136,7 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 	workflowOptions := client.StartWorkflowOptions{
 		ID:                       workflowId,
 		TaskQueue:                string(e.taskQueueName),
-		WorkflowExecutionTimeout: 25 * time.Hour,
+		WorkflowExecutionTimeout: JOB_APPLICATION_TIMEOUT,
 		WorkflowTaskTimeout:      1 * time.Minute,
 	}
 
