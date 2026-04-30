@@ -78,7 +78,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	workflowOptions := client.StartWorkflowOptions{
 		ID:                       workflowId,
 		TaskQueue:                string(e.taskQueueName),
-		WorkflowExecutionTimeout: 40 * time.Minute,
+		WorkflowExecutionTimeout: 24 * time.Hour,
 		WorkflowTaskTimeout:      1 * time.Minute,
 	}
 
