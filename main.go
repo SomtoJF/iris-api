@@ -9,6 +9,7 @@ import (
 	"github.com/SomtoJF/iris-api/common"
 	"github.com/SomtoJF/iris-api/endpoints/auth"
 	"github.com/SomtoJF/iris-api/endpoints/costtracking"
+	"github.com/SomtoJF/iris-api/endpoints/coverletter"
 	"github.com/SomtoJF/iris-api/endpoints/health"
 	"github.com/SomtoJF/iris-api/endpoints/issue"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplication"
@@ -97,6 +98,7 @@ func main() {
 	costTrackingEndpoint := costtracking.NewEndpoint(db)
 	issueEndpoint := issue.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 	jobApplicationDataEndpoint := jobapplicationdata.NewEndpoint(db, logger)
+	coverLetterEndpoint := coverletter.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 
 	authMiddleware := verifyauth.NewMiddleware(db)
 
@@ -127,6 +129,11 @@ func main() {
 		protected.GET("/jobs/:id/application-data", jobApplicationDataEndpoint.GetJobApplicationData)
 		protected.GET("/jobs/search/history", jobSearchEndpoint.GetJobSearchHistory)
 		protected.POST("/jobs/search", jobSearchEndpoint.TriggerJobSearch)
+
+		protected.POST("/coverletter", coverLetterEndpoint.CreateCoverLetter)
+		protected.POST("/coverletter/regenerate", coverLetterEndpoint.RegenerateCoverLetter)
+		protected.GET("/coverletter", coverLetterEndpoint.GetCoverLetters)
+		protected.GET("/coverletter/job-application/:jobApplicationId", coverLetterEndpoint.GetCoverLetter)
 
 		protected.GET("/realtime/events", realtimeEventsEndpoint.StreamEvents)
 

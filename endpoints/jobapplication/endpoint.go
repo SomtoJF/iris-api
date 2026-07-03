@@ -10,10 +10,9 @@ import (
 
 	"github.com/SomtoJF/iris-api/model"
 	"github.com/SomtoJF/iris-api/temporal"
+	"github.com/SomtoJF/iris-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/lib/pq"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
 )
@@ -42,26 +41,6 @@ type JobApplicationWorkflowInput struct {
 
 const JOB_APPLICATION_TIMEOUT = 24 * time.Hour
 
-func isUniqueConstraintViolation(err error) bool {
-	// Prefer Gorm's translated error when available (TranslateError=true),
-	// but also handle raw driver errors (e.g. pgx / libpq) by SQLSTATE code.
-	if errors.Is(err, gorm.ErrDuplicatedKey) {
-		return true
-	}
-
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-		return true
-	}
-
-	var pqErr *pq.Error
-	if errors.As(err, &pqErr) && string(pqErr.Code) == "23505" {
-		return true
-	}
-
-	return false
-}
-
 func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
@@ -89,7 +68,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		WorkflowID:     &workflowId,
 	}
 	if err := e.db.Create(&jobApplication).Error; err != nil {
-		if isUniqueConstraintViolation(err) {
+		if utils.IsUniqueConstraintViolation(err) {
 			e.logger.WarnContext(c.Request.Context(), "job application duplicate key", "error", err)
 			c.JSON(http.StatusConflict, gin.H{"error": "Job application already exists"})
 			return
