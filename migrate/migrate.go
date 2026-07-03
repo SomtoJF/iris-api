@@ -34,10 +34,10 @@ func main() {
 	// 	log.Fatal(err)
 	// }
 
-	// log.Println("Starting migration on table job application")
-	// if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
-	// 	log.Fatal(err)
-	// }
+	log.Println("Starting migration on table job application")
+	if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
+		log.Fatal(err)
+	}
 	// Replace full unique index with partial index so soft-deleted rows don't block re-apply
 	// db.Exec("DROP INDEX IF EXISTS idx_job_application_url_user")
 	// db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_job_application_url_user ON job_application (id_user, url) WHERE deleted_at IS NULL")
@@ -87,10 +87,10 @@ func main() {
 	// 	log.Fatal(err)
 	// }
 
-	log.Println("Starting migration on table website cache")
-	if err := db.AutoMigrate(&model.WebsiteCache{}); err != nil {
-		log.Fatal(err)
-	}
+	// log.Println("Starting migration on table website cache")
+	// if err := db.AutoMigrate(&model.WebsiteCache{}); err != nil {
+	// 	log.Fatal(err)
+	// }
 	log.Println("Migration completed")
 }
 
