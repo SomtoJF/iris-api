@@ -213,13 +213,15 @@ func (e *Endpoint) RegenerateCoverLetter(c *gin.Context) {
 }
 
 type GetCoverLetterResponse struct {
-	JobApplicationId string `json:"jobApplicationId"`
-	CoverLetter      string `json:"coverLetter"`
-	CompanyName      string `json:"companyName"`
-	JobTitle         string `json:"jobTitle"`
-	JobDescription   string `json:"jobDescription"`
-	Url              string `json:"url"`
-	ResumeId         string `json:"resumeId"`
+	JobApplicationId string                     `json:"jobApplicationId"`
+	CoverLetter      string                     `json:"coverLetter"`
+	CompanyName      string                     `json:"companyName"`
+	JobTitle         string                     `json:"jobTitle"`
+	JobDescription   string                     `json:"jobDescription"`
+	Url              string                     `json:"url"`
+	ResumeId         string                     `json:"resumeId"`
+	Status           model.JobApplicationStatus `json:"status"`
+	CreatedAt        time.Time                  `json:"createdAt"`
 }
 
 // GET /coverletter/job-application/:jobApplicationId
@@ -265,12 +267,14 @@ type FetchCoverLettersRequest struct {
 
 // CoverLetterListItem is GetCoverLetterResponse without the cover letter body.
 type CoverLetterListItem struct {
-	JobApplicationId string `json:"jobApplicationId"`
-	CompanyName      string `json:"companyName"`
-	JobTitle         string `json:"jobTitle"`
-	JobDescription   string `json:"jobDescription"`
-	Url              string `json:"url"`
-	ResumeId         string `json:"resumeId"`
+	JobApplicationId string                     `json:"jobApplicationId"`
+	CompanyName      string                     `json:"companyName"`
+	JobTitle         string                     `json:"jobTitle"`
+	JobDescription   string                     `json:"jobDescription"`
+	Url              string                     `json:"url"`
+	ResumeId         string                     `json:"resumeId"`
+	Status           model.JobApplicationStatus `json:"status"`
+	CreatedAt        time.Time                  `json:"createdAt"`
 }
 
 type FetchCoverLettersResponse struct {
@@ -313,7 +317,7 @@ func (e *Endpoint) GetCoverLetters(c *gin.Context) {
 		Preload("JobApplicationData.Resume")
 	if request.Search != "" {
 		like := "%" + request.Search + "%"
-		baseQuery = baseQuery.Where("job_title LIKE ? OR company_name LIKE ?", like, like)
+		baseQuery = baseQuery.Where("job_title ILIKE ? OR company_name ILIKE ?", like, like)
 	}
 
 	var total int64
@@ -464,6 +468,8 @@ func buildCoverLetterResponse(jobApplication *model.JobApplication) GetCoverLett
 		JobTitle:         jobApplication.JobTitle,
 		JobDescription:   jobApplication.JobDescription,
 		Url:              jobApplication.Url,
+		Status:           jobApplication.Status,
+		CreatedAt:        jobApplication.CreatedAt,
 	}
 	if data := jobApplication.JobApplicationData; data != nil {
 		if data.CoverLetter != nil {
@@ -481,6 +487,8 @@ func buildCoverLetterListItem(jobApplication *model.JobApplication) CoverLetterL
 		JobTitle:         jobApplication.JobTitle,
 		JobDescription:   jobApplication.JobDescription,
 		Url:              jobApplication.Url,
+		Status:           jobApplication.Status,
+		CreatedAt:        jobApplication.CreatedAt,
 	}
 	if data := jobApplication.JobApplicationData; data != nil {
 		item.ResumeId = data.Resume.IdExternal.String()

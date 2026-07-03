@@ -199,7 +199,7 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	}
 
 	baseQuery := e.db.Model(&model.JobApplication{}).
-		Where("id_user = ? AND deleted_at IS NULL", userId).
+		Where("id_user = ? AND cover_letter_only = false AND deleted_at IS NULL", userId).
 		Preload("JobApplicationData")
 	if request.Search != "" {
 		baseQuery = baseQuery.Where("job_title LIKE ? OR company_name LIKE ?", "%"+request.Search+"%", "%"+request.Search+"%")
