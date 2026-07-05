@@ -28,13 +28,29 @@ func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger,
 	return &Endpoint{db: db, temporalClient: temporalClient, logger: logger, taskQueueName: taskQueueName}
 }
 
+// resolveResume returns the resume identified by externalId (scoped to the user)
+// when provided, otherwise the user's active resume.
+func (e *Endpoint) resolveResume(userId uint, externalId *string) (model.Resume, error) {
+	var resume model.Resume
+	if externalId != nil && *externalId != "" {
+		err := e.db.Where("id_external = ? AND id_user = ? AND deleted_at IS NULL", *externalId, userId).First(&resume).Error
+		return resume, err
+	}
+	err := e.db.Where("id_user = ? AND is_active = true AND deleted_at IS NULL", userId).First(&resume).Error
+	return resume, err
+}
+
 type ApplyForJobRequest struct {
 	Url string `json:"url" binding:"required"`
+	// ResumeId is the external UUID of the resume to apply with. When omitted,
+	// the user's active resume is used.
+	ResumeId *string `json:"resumeId"`
 }
 
 type JobApplicationWorkflowInput struct {
 	Url                   string `json:"url"`
 	IdUser                uint   `json:"id_user"`
+	IdResume              uint   `json:"id_resume"`
 	IdJobApplication      uint   `json:"id_job_application"`
 	ApplicationExternalId string `json:"application_external_id"`
 }
@@ -56,6 +72,17 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		return
 	}
 
+	resume, err := e.resolveResume(userId, request.ResumeId)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No resume found"})
+			return
+		}
+		e.logger.ErrorContext(c.Request.Context(), "failed to resolve resume", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve resume"})
+		return
+	}
+
 	workflowId := fmt.Sprintf("job-application-%s-%s", request.Url, uuid.New().String())
 
 	jobApplication := model.JobApplication{
@@ -65,6 +92,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		JobDescription: "Pending-Job-Description",
 		Status:         model.JobApplicationStatusPending,
 		UserId:         userId,
+		ResumeId:       resume.IdResume,
 		WorkflowID:     &workflowId,
 	}
 	if err := e.db.Create(&jobApplication).Error; err != nil {
@@ -89,9 +117,10 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		Url:                   request.Url,
 		IdJobApplication:      jobApplication.IdJobApplication,
 		IdUser:                userId,
+		IdResume:              resume.IdResume,
 		ApplicationExternalId: jobApplication.IdExternal.String(),
 	}
-	_, err := e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", workflowInput)
+	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", workflowInput)
 	if err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to start job application workflow", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start job application process"})
@@ -145,6 +174,7 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 		Url:                   jobApplication.Url,
 		IdJobApplication:      jobApplication.IdJobApplication,
 		IdUser:                userId,
+		IdResume:              jobApplication.ResumeId,
 		ApplicationExternalId: jobApplication.IdExternal.String(),
 	}
 	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", workflowInput)

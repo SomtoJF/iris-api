@@ -78,20 +78,20 @@ func (e *Endpoint) CreateCoverLetter(c *gin.Context) {
 		return
 	}
 
-	// The workflow always generates from the active resume; resolve it here so we can
-	// persist the correct ResumeId on the resulting JobApplicationData.
-	resume, err := e.resolveActiveResume(userId)
+	// Pin the resume on the JobApplication at creation: the requested resume when
+	// provided, otherwise the user's active resume.
+	resume, err := e.resolveResume(userId, input.ResumeId)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No active resume found"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No resume found"})
 			return
 		}
-		e.logger.ErrorContext(ctx, "failed to resolve active resume", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve active resume"})
+		e.logger.ErrorContext(ctx, "failed to resolve resume", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve resume"})
 		return
 	}
 
-	jobApplication, err := e.createCoverLetterApplication(userId, input)
+	jobApplication, err := e.createCoverLetterApplication(userId, resume.IdResume, input)
 	if err != nil {
 		if utils.IsUniqueConstraintViolation(err) {
 			e.logger.WarnContext(ctx, "cover letter application duplicate key", "error", err)
@@ -111,7 +111,7 @@ func (e *Endpoint) CreateCoverLetter(c *gin.Context) {
 		return
 	}
 
-	if err := e.persistCoverLetterData(&jobApplication, resume.IdResume, coverLetter); err != nil {
+	if err := e.persistCoverLetterData(&jobApplication, coverLetter); err != nil {
 		e.logger.ErrorContext(ctx, "failed to persist cover letter data", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save cover letter"})
 		return
@@ -166,17 +166,6 @@ func (e *Endpoint) RegenerateCoverLetter(c *gin.Context) {
 		return
 	}
 
-	resume, err := e.resolveActiveResume(userId)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No active resume found"})
-			return
-		}
-		e.logger.ErrorContext(ctx, "failed to resolve active resume", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve active resume"})
-		return
-	}
-
 	workflowId := newCoverLetterWorkflowID()
 	if err := e.db.Model(&jobApplication).Updates(map[string]any{
 		"status":      model.JobApplicationStatusPending,
@@ -200,7 +189,7 @@ func (e *Endpoint) RegenerateCoverLetter(c *gin.Context) {
 		return
 	}
 
-	if err := e.persistCoverLetterData(&jobApplication, resume.IdResume, coverLetter); err != nil {
+	if err := e.persistCoverLetterData(&jobApplication, coverLetter); err != nil {
 		e.logger.ErrorContext(ctx, "failed to persist cover letter data on regenerate", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save cover letter"})
 		return
@@ -245,7 +234,7 @@ func (e *Endpoint) GetCoverLetter(c *gin.Context) {
 	if err := e.db.
 		Where("id_external = ? AND id_user = ? AND cover_letter_only = true AND deleted_at IS NULL", id, userId).
 		Preload("JobApplicationData").
-		Preload("JobApplicationData.Resume").
+		Preload("Resume").
 		First(&jobApplication).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Cover letter not found"})
@@ -314,7 +303,7 @@ func (e *Endpoint) GetCoverLetters(c *gin.Context) {
 	baseQuery := e.db.Model(&model.JobApplication{}).
 		Where("id_user = ? AND cover_letter_only = true AND deleted_at IS NULL", userId).
 		Preload("JobApplicationData").
-		Preload("JobApplicationData.Resume")
+		Preload("Resume")
 	if request.Search != "" {
 		like := "%" + request.Search + "%"
 		baseQuery = baseQuery.Where("job_title ILIKE ? OR company_name ILIKE ?", like, like)
@@ -357,16 +346,23 @@ func newCoverLetterWorkflowID() string {
 	return fmt.Sprintf("cover-letter-%s", uuid.New().String())
 }
 
-func (e *Endpoint) resolveActiveResume(userId uint) (model.Resume, error) {
+// resolveResume returns the resume identified by externalId (scoped to the user)
+// when provided, otherwise the user's active resume.
+func (e *Endpoint) resolveResume(userId uint, externalId *string) (model.Resume, error) {
 	var resume model.Resume
+	if externalId != nil && *externalId != "" {
+		err := e.db.Where("id_external = ? AND id_user = ? AND deleted_at IS NULL", *externalId, userId).First(&resume).Error
+		return resume, err
+	}
 	err := e.db.Where("id_user = ? AND is_active = true AND deleted_at IS NULL", userId).First(&resume).Error
 	return resume, err
 }
 
-func (e *Endpoint) createCoverLetterApplication(userId uint, input CreateCoverLetterInput) (model.JobApplication, error) {
+func (e *Endpoint) createCoverLetterApplication(userId, resumeId uint, input CreateCoverLetterInput) (model.JobApplication, error) {
 	workflowId := newCoverLetterWorkflowID()
 	jobApplication := model.JobApplication{
 		UserId:          userId,
+		ResumeId:        resumeId,
 		JobTitle:        input.JobTitle,
 		CompanyName:     input.CompanyName,
 		JobDescription:  input.JobDescription,
@@ -423,7 +419,7 @@ func (e *Endpoint) runCoverLetterWorkflow(ctx context.Context, workflowId string
 
 // persistCoverLetterData upserts the JobApplicationData row with the generated cover letter
 // and marks the application as applied.
-func (e *Endpoint) persistCoverLetterData(jobApplication *model.JobApplication, resumeId uint, coverLetter string) error {
+func (e *Endpoint) persistCoverLetterData(jobApplication *model.JobApplication, coverLetter string) error {
 	return e.db.Transaction(func(tx *gorm.DB) error {
 		var data model.JobApplicationData
 		err := tx.Where("id_job_application = ?", jobApplication.IdJobApplication).First(&data).Error
@@ -435,7 +431,6 @@ func (e *Endpoint) persistCoverLetterData(jobApplication *model.JobApplication, 
 		case errors.Is(err, gorm.ErrRecordNotFound):
 			data = model.JobApplicationData{
 				UserId:           jobApplication.UserId,
-				ResumeId:         resumeId,
 				JobApplicationId: jobApplication.IdJobApplication,
 				CoverLetter:      &coverLetter,
 				Questions:        model.JobApplicationQuestionsList{},
@@ -475,8 +470,8 @@ func buildCoverLetterResponse(jobApplication *model.JobApplication) GetCoverLett
 		if data.CoverLetter != nil {
 			res.CoverLetter = *data.CoverLetter
 		}
-		res.ResumeId = data.Resume.IdExternal.String()
 	}
+	res.ResumeId = jobApplication.Resume.IdExternal.String()
 	return res
 }
 
@@ -490,8 +485,6 @@ func buildCoverLetterListItem(jobApplication *model.JobApplication) CoverLetterL
 		Status:           jobApplication.Status,
 		CreatedAt:        jobApplication.CreatedAt,
 	}
-	if data := jobApplication.JobApplicationData; data != nil {
-		item.ResumeId = data.Resume.IdExternal.String()
-	}
+	item.ResumeId = jobApplication.Resume.IdExternal.String()
 	return item
 }

@@ -46,7 +46,7 @@ func (e *Endpoint) GetJobApplicationData(c *gin.Context) {
 	}
 
 	var jobApp model.JobApplication
-	if err := e.db.Where("id_external = ? AND id_user = ?", jobAppId, userId).First(&jobApp).Error; err != nil {
+	if err := e.db.Where("id_external = ? AND id_user = ?", jobAppId, userId).Preload("Resume").First(&jobApp).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
 			return
@@ -58,7 +58,6 @@ func (e *Endpoint) GetJobApplicationData(c *gin.Context) {
 
 	var data model.JobApplicationData
 	if err := e.db.Where("id_job_application = ? AND id_user = ?", jobApp.IdJobApplication, userId).
-		Preload("Resume").
 		First(&data).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Application data not found"})
@@ -73,9 +72,9 @@ func (e *Endpoint) GetJobApplicationData(c *gin.Context) {
 		Questions:   data.Questions,
 		CoverLetter: data.CoverLetter,
 		Resume: ResumeDTO{
-			Id:       data.Resume.IdExternal.String(),
-			FileName: data.Resume.FileName,
-			FileSize: data.Resume.FileSize,
+			Id:       jobApp.Resume.IdExternal.String(),
+			FileName: jobApp.Resume.FileName,
+			FileSize: jobApp.Resume.FileSize,
 		},
 	}})
 }
