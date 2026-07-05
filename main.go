@@ -98,7 +98,7 @@ func main() {
 	costTrackingEndpoint := costtracking.NewEndpoint(db)
 	issueEndpoint := issue.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 	jobApplicationDataEndpoint := jobapplicationdata.NewEndpoint(db, logger)
-	coverLetterEndpoint := coverletter.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
+	coverLetterEndpoint := coverletter.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName, redisPubSub)
 
 	authMiddleware := verifyauth.NewMiddleware(db)
 

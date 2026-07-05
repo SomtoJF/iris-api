@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/SomtoJF/iris-api/model"
+	redispubsub "github.com/SomtoJF/iris-api/pkg/redis"
 	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/SomtoJF/iris-api/utils"
 	"github.com/gin-gonic/gin"
@@ -24,10 +25,11 @@ type Endpoint struct {
 	temporalClient client.Client
 	logger         *slog.Logger
 	taskQueueName  temporal.TaskQueueName
+	redisPubSub    *redispubsub.RedisPubSub
 }
 
-func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger, taskQueueName temporal.TaskQueueName) *Endpoint {
-	return &Endpoint{db: db, temporalClient: temporalClient, logger: logger, taskQueueName: taskQueueName}
+func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger, taskQueueName temporal.TaskQueueName, redisPubSub *redispubsub.RedisPubSub) *Endpoint {
+	return &Endpoint{db: db, temporalClient: temporalClient, logger: logger, taskQueueName: taskQueueName, redisPubSub: redisPubSub}
 }
 
 // coverLetterWorkflowInput mirrors the worker's coverletter.CoverLetterWorkflowInput.
@@ -55,9 +57,12 @@ type CreateCoverLetterInput struct {
 	Url            string  `json:"url" binding:"required"`
 }
 
+// CreateCoverLetterResponse is returned immediately (202) once generation has been
+// kicked off in the background. The cover letter body is delivered later via a
+// COVER_LETTER_READY realtime event, not in this response.
 type CreateCoverLetterResponse struct {
-	JobApplicationId string `json:"jobApplicationId"`
-	CoverLetter      string `json:"coverLetter"`
+	JobApplicationId string                     `json:"jobApplicationId"`
+	Status           model.JobApplicationStatus `json:"status"`
 }
 
 // POST /coverletter
@@ -103,23 +108,13 @@ func (e *Endpoint) CreateCoverLetter(c *gin.Context) {
 		return
 	}
 
-	coverLetter, err := e.runCoverLetterWorkflow(ctx, *jobApplication.WorkflowID, userId, jobApplication.IdJobApplication, nil, false)
-	if err != nil {
-		e.markApplicationFailed(&jobApplication, err)
-		e.logger.ErrorContext(ctx, "cover letter workflow failed", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate cover letter"})
-		return
-	}
+	// Generation takes minutes; run it in the background and return immediately.
+	// Completion is signalled to the frontend via a realtime event.
+	e.generateCoverLetterAsync(userId, jobApplication, *jobApplication.WorkflowID, nil, false)
 
-	if err := e.persistCoverLetterData(&jobApplication, coverLetter); err != nil {
-		e.logger.ErrorContext(ctx, "failed to persist cover letter data", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save cover letter"})
-		return
-	}
-
-	c.JSON(http.StatusCreated, CreateCoverLetterResponse{
+	c.JSON(http.StatusAccepted, CreateCoverLetterResponse{
 		JobApplicationId: jobApplication.IdExternal.String(),
-		CoverLetter:      coverLetter,
+		Status:           jobApplication.Status,
 	})
 }
 
@@ -181,23 +176,14 @@ func (e *Endpoint) RegenerateCoverLetter(c *gin.Context) {
 		edit = &editInstructions{Instructions: input.EditInstructions}
 	}
 
-	coverLetter, err := e.runCoverLetterWorkflow(ctx, workflowId, userId, jobApplication.IdJobApplication, edit, input.UltraWrite)
-	if err != nil {
-		e.markApplicationFailed(&jobApplication, err)
-		e.logger.ErrorContext(ctx, "cover letter workflow failed on regenerate", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to regenerate cover letter"})
-		return
-	}
+	// Regeneration takes minutes; run it in the background and return immediately.
+	// Completion is signalled to the frontend via a realtime event.
+	jobApplication.Status = model.JobApplicationStatusPending
+	e.generateCoverLetterAsync(userId, jobApplication, workflowId, edit, input.UltraWrite)
 
-	if err := e.persistCoverLetterData(&jobApplication, coverLetter); err != nil {
-		e.logger.ErrorContext(ctx, "failed to persist cover letter data on regenerate", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save cover letter"})
-		return
-	}
-
-	c.JSON(http.StatusOK, CreateCoverLetterResponse{
+	c.JSON(http.StatusAccepted, CreateCoverLetterResponse{
 		JobApplicationId: jobApplication.IdExternal.String(),
-		CoverLetter:      coverLetter,
+		Status:           model.JobApplicationStatusPending,
 	})
 }
 
@@ -415,6 +401,46 @@ func (e *Endpoint) runCoverLetterWorkflow(ctx context.Context, workflowId string
 		return "", errors.New("cover letter workflow returned empty result")
 	}
 	return coverLetter, nil
+}
+
+// generateCoverLetterAsync runs the cover letter workflow in the background so the
+// request handler can return immediately. On completion it persists the result and
+// publishes a realtime event (ready/failed) to the user. jobApplication is taken by
+// value so the caller can return safely once the goroutine is spawned.
+func (e *Endpoint) generateCoverLetterAsync(userId uint, jobApplication model.JobApplication, workflowId string, edit *editInstructions, ultraWrite bool) {
+	go func() {
+		// The request context is cancelled once the handler returns, so use a fresh one.
+		ctx := context.Background()
+
+		coverLetter, err := e.runCoverLetterWorkflow(ctx, workflowId, userId, jobApplication.IdJobApplication, edit, ultraWrite)
+		if err != nil {
+			e.logger.Error("cover letter workflow failed", "error", err)
+			e.failCoverLetter(ctx, &jobApplication, userId, err)
+			return
+		}
+
+		if err := e.persistCoverLetterData(&jobApplication, coverLetter); err != nil {
+			e.logger.Error("failed to persist cover letter data", "error", err)
+			e.failCoverLetter(ctx, &jobApplication, userId, err)
+			return
+		}
+
+		e.publishCoverLetterEvent(ctx, userId, jobApplication.IdExternal.String(), redispubsub.EventCoverLetterReady, model.JobApplicationStatusApplied)
+	}()
+}
+
+// failCoverLetter marks the application failed and notifies the user.
+func (e *Endpoint) failCoverLetter(ctx context.Context, jobApplication *model.JobApplication, userId uint, cause error) {
+	e.markApplicationFailed(jobApplication, cause)
+	e.publishCoverLetterEvent(ctx, userId, jobApplication.IdExternal.String(), redispubsub.EventCoverLetterFailed, model.JobApplicationStatusFailed)
+}
+
+// publishCoverLetterEvent pushes a cover letter status change to the user's realtime channel.
+func (e *Endpoint) publishCoverLetterEvent(ctx context.Context, userId uint, jobApplicationId string, event redispubsub.EventType, status model.JobApplicationStatus) {
+	data := map[string]any{"jobApplicationId": jobApplicationId, "status": status}
+	if err := e.redisPubSub.PublishToUser(ctx, fmt.Sprintf("%d", userId), event, data); err != nil {
+		e.logger.Error("failed to publish cover letter event", "error", err)
+	}
 }
 
 // persistCoverLetterData upserts the JobApplicationData row with the generated cover letter

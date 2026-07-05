@@ -17,6 +17,8 @@ const (
 	EventApplicationSuccessful EventType = "APPLICATION_SUCCESSFUL"
 	EventApplicationFailed     EventType = "APPLICATION_FAILED"
 	EventUserActionRequired    EventType = "USER_NOTIFICATION"
+	EventCoverLetterReady      EventType = "COVER_LETTER_READY"
+	EventCoverLetterFailed     EventType = "COVER_LETTER_FAILED"
 )
 
 // Event represents a real-time event to be sent to clients
