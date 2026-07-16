@@ -154,9 +154,12 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 	workflowId := fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String())
 
 	if err := e.db.Model(&jobApplication).Updates(map[string]any{
-		"status":      model.JobApplicationStatusPending,
-		"workflow_id": &workflowId,
-		"created_at":  time.Now(),
+		"status":              model.JobApplicationStatusPending,
+		"workflow_id":         &workflowId,
+		"created_at":          time.Now(),
+		"failure_reason":      nil,
+		"halt_reason":         nil,
+		"cancellation_reason": nil,
 	}).Error; err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to update job application on retry", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
@@ -202,6 +205,7 @@ type JobApplication struct {
 	HasApplicationData bool                       `json:"hasApplicationData"`
 	FailureReason      *string                    `json:"failureReason,omitempty"`
 	CancellationReason *string                    `json:"cancellationReason,omitempty"`
+	HaltReason         *string                    `json:"haltReason,omitempty"`
 	CreatedAt          time.Time                  `json:"createdAt"`
 	UpdatedAt          time.Time                  `json:"updatedAt"`
 }
@@ -259,6 +263,7 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 			HasApplicationData: jobApplication.JobApplicationData != nil,
 			FailureReason:      jobApplication.FailureReason,
 			CancellationReason: jobApplication.CancellationReason,
+			HaltReason:         jobApplication.HaltReason,
 			CreatedAt:          jobApplication.CreatedAt,
 			UpdatedAt:          jobApplication.UpdatedAt,
 		})
@@ -369,8 +374,10 @@ func (e *Endpoint) DeleteApplication(c *gin.Context) {
 		return
 	}
 
-	if jobApplication.Status != model.JobApplicationStatusFailed && jobApplication.Status != model.JobApplicationStatusCancelled {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only failed or cancelled applications can be deleted"})
+	if jobApplication.Status != model.JobApplicationStatusFailed &&
+		jobApplication.Status != model.JobApplicationStatusCancelled &&
+		jobApplication.Status != model.JobApplicationStatusHalted {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only failed, cancelled, or halted applications can be deleted"})
 		return
 	}
 

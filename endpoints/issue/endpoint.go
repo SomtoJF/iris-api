@@ -44,6 +44,7 @@ type jobApplication struct {
 	Url           string    `json:"url"`
 	Status        string    `json:"status"`
 	FailureReason *string   `json:"failureReason"`
+	HaltReason    *string   `json:"haltReason,omitempty"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 }
@@ -141,6 +142,7 @@ func jobApplicationToDTO(ja *model.JobApplication) *jobApplication {
 		Url:           ja.Url,
 		Status:        string(ja.Status),
 		FailureReason: ja.FailureReason,
+		HaltReason:    ja.HaltReason,
 		CreatedAt:     ja.CreatedAt,
 		UpdatedAt:     ja.UpdatedAt,
 	}
