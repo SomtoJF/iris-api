@@ -194,6 +194,7 @@ type FetchAllJobApplicationsRequest struct {
 	Page   int    `form:"page" binding:"required"`
 	Limit  int    `form:"limit" binding:"required"`
 	Search string `form:"search"`
+	Status string `form:"status" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
 }
 
 type JobApplication struct {
@@ -237,6 +238,9 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 		Preload("JobApplicationData")
 	if request.Search != "" {
 		baseQuery = baseQuery.Where("job_title LIKE ? OR company_name LIKE ?", "%"+request.Search+"%", "%"+request.Search+"%")
+	}
+	if request.Status != "" {
+		baseQuery = baseQuery.Where("status = ?", request.Status)
 	}
 
 	var jobApplications []model.JobApplication
