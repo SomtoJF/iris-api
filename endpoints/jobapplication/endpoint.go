@@ -194,7 +194,8 @@ type FetchAllJobApplicationsRequest struct {
 	Page   int    `form:"page" binding:"required"`
 	Limit  int    `form:"limit" binding:"required"`
 	Search string `form:"search"`
-	Status string `form:"status" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
+	Status    string `form:"status" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
+	StatusNot string `form:"status_not" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
 }
 
 type JobApplication struct {
@@ -241,6 +242,9 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	}
 	if request.Status != "" {
 		baseQuery = baseQuery.Where("status = ?", request.Status)
+	}
+	if request.StatusNot != "" {
+		baseQuery = baseQuery.Where("status != ?", request.StatusNot)
 	}
 
 	var jobApplications []model.JobApplication
