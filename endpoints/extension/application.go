@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/SomtoJF/iris-api/model"
 	"github.com/SomtoJF/iris-api/temporal"
@@ -29,14 +30,24 @@ type ApplyForJobRequest struct {
 }
 
 type InitiateApplicationWorkflowInput struct {
-	Url      string `json:"url" binding:"required"`
-	ResumeId string `json:"resumeId"`
+	Url              string `json:"url"`
+	IdUser           uint   `json:"id_user"`
+	IdJobApplication uint   `json:"id_job_application"`
 }
 
 type InitiateApplicationWorkflowResponse struct {
 	JobTitle       string `json:"jobTitle"`
 	CompanyName    string `json:"companyName"`
 	JobDescription string `json:"jobDescription"`
+}
+
+type InitiateApplicationResponse struct {
+	Id          string                     `json:"id"`
+	Url         string                     `json:"url"`
+	JobTitle    string                     `json:"jobTitle"`
+	CompanyName string                     `json:"companyName"`
+	Status      model.JobApplicationStatus `json:"status"`
+	UpdatedAt   time.Time                  `json:"updatedAt"`
 }
 
 func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger, taskQueueName temporal.TaskQueueName) *Endpoint {
@@ -46,39 +57,15 @@ func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger,
 func (e *Endpoint) InitiateApplication(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "ApplyForJob")
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "InitiateApplication")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
 	var request ApplyForJobRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "ApplyForJob", "error", err)
+		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "InitiateApplication", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	// initiate application workflow
-	workflowID := uuid.New().String()
-	workflowInput := InitiateApplicationWorkflowInput{
-		Url:      request.Url,
-		ResumeId: request.ResumeId,
-	}
-
-	run, err := e.temporalClient.ExecuteWorkflow(c.Request.Context(), client.StartWorkflowOptions{
-		ID:        workflowID,
-		TaskQueue: string(e.taskQueueName),
-	}, "InitiateApplicationWorkflow", workflowInput)
-	if err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to initiate application workflow", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initiate application workflow"})
-		return
-	}
-
-	var workflowResponse InitiateApplicationWorkflowResponse
-	if err := run.Get(c.Request.Context(), &workflowResponse); err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to get workflow result", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get workflow result"})
 		return
 	}
 
@@ -93,16 +80,18 @@ func (e *Endpoint) InitiateApplication(c *gin.Context) {
 		return
 	}
 
-	if err := e.db.Create(&model.JobApplication{
+	workflowID := uuid.New().String()
+	jobApplication := model.JobApplication{
 		Url:            request.Url,
-		ResumeId:       resume.IdResume,
-		JobTitle:       workflowResponse.JobTitle,
-		CompanyName:    workflowResponse.CompanyName,
-		JobDescription: workflowResponse.JobDescription,
+		JobTitle:       "Pending-Job-Title",
+		CompanyName:    "Pending-Company-Name",
+		JobDescription: "Pending-Job-Description",
 		Status:         model.JobApplicationStatusPending,
 		UserId:         userId,
+		ResumeId:       resume.IdResume,
 		WorkflowID:     &workflowID,
-	}).Error; err != nil {
+	}
+	if err := e.db.Create(&jobApplication).Error; err != nil {
 		if utils.IsUniqueConstraintViolation(err) {
 			e.logger.WarnContext(c.Request.Context(), "job application duplicate key", "error", err)
 			c.JSON(http.StatusConflict, gin.H{"error": "Job application already exists"})
@@ -113,7 +102,55 @@ func (e *Endpoint) InitiateApplication(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Application initiated"})
+	run, err := e.temporalClient.ExecuteWorkflow(c.Request.Context(), client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: string(e.taskQueueName),
+	}, "InitiateApplicationWorkflow", InitiateApplicationWorkflowInput{
+		Url:              request.Url,
+		IdUser:           userId,
+		IdJobApplication: jobApplication.IdJobApplication,
+	})
+	if err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to initiate application workflow", "error", err)
+		e.softDeleteApplication(c, &jobApplication)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initiate application workflow"})
+		return
+	}
+
+	var workflowResponse InitiateApplicationWorkflowResponse
+	if err := run.Get(c.Request.Context(), &workflowResponse); err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to get workflow result", "error", err)
+		e.softDeleteApplication(c, &jobApplication)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get workflow result"})
+		return
+	}
+
+	if err := e.db.Model(&jobApplication).Updates(map[string]any{
+		"job_title":       workflowResponse.JobTitle,
+		"company_name":    workflowResponse.CompanyName,
+		"job_description": workflowResponse.JobDescription,
+	}).Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to update job application after initiate", "error", err)
+		e.softDeleteApplication(c, &jobApplication)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": InitiateApplicationResponse{
+		Id:          jobApplication.IdExternal.String(),
+		Url:         jobApplication.Url,
+		JobTitle:    workflowResponse.JobTitle,
+		CompanyName: workflowResponse.CompanyName,
+		Status:      jobApplication.Status,
+		UpdatedAt:   time.Now(),
+	}})
+}
+
+func (e *Endpoint) softDeleteApplication(c *gin.Context, jobApplication *model.JobApplication) {
+	now := time.Now()
+	if err := e.db.Model(jobApplication).Update("deleted_at", &now).Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to soft-delete job application after initiate failure", "error", err, "id_job_application", jobApplication.IdJobApplication)
+	}
 }
 
 // resolveResume returns the resume identified by externalId (scoped to the user)
