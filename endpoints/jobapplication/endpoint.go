@@ -399,6 +399,67 @@ func (e *Endpoint) DeleteApplication(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Job application deleted"})
 }
 
+type PatchJobApplicationRequest struct {
+	ResumeId *string `json:"resumeId"`
+}
+
+func (e *Endpoint) PatchJobApplication(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "PatchJobApplication")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		return
+	}
+
+	var req PatchJobApplicationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "PatchJobApplication", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.ResumeId == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No updatable fields provided"})
+		return
+	}
+
+	var jobApplication model.JobApplication
+	if err := e.db.Where("id_external = ? AND id_user = ? AND deleted_at IS NULL", id, userId).First(&jobApplication).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+			return
+		}
+		e.logger.ErrorContext(c.Request.Context(), "failed to load job application for patch", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load job application"})
+		return
+	}
+
+	resume, err := e.resolveResume(userId, req.ResumeId)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No resume found"})
+			return
+		}
+		e.logger.ErrorContext(c.Request.Context(), "failed to resolve resume for patch", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve resume"})
+		return
+	}
+
+	if err := e.db.Model(&jobApplication).Update("id_resume", resume.IdResume).Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to update job application resume", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Job application updated"})
+}
+
 func (e *Endpoint) GetUserAction(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
@@ -437,6 +498,11 @@ func (e *Endpoint) GetUserAction(c *gin.Context) {
 	})
 }
 
+type ResumeSummary struct {
+	Id       string `json:"id"`
+	FileName string `json:"fileName"`
+}
+
 type JobApplicationComprehensiveResponse struct {
 	Id             string                          `json:"id"`
 	Url            string                          `json:"url"`
@@ -446,6 +512,7 @@ type JobApplicationComprehensiveResponse struct {
 	Questions      []model.JobApplicationQuestions `json:"questions"`
 	JobDescription string                          `json:"jobDescription"`
 	CoverLetter    *string                         `json:"coverLetter"`
+	Resume         ResumeSummary                   `json:"resume"`
 }
 
 // get /jobs/:id/comprehensive
@@ -464,7 +531,7 @@ func (e *Endpoint) FetchJobApplicationComprehensive(c *gin.Context) {
 	}
 
 	var jobApplication model.JobApplication
-	if err := e.db.Preload("JobApplicationData").Where("id_external = ? AND id_user = ? AND cover_letter_only = false", id, userId).First(&jobApplication).Error; err != nil {
+	if err := e.db.Preload("JobApplicationData").Preload("Resume").Where("id_external = ? AND id_user = ? AND cover_letter_only = false", id, userId).First(&jobApplication).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
 		return
 	}
@@ -489,5 +556,9 @@ func (e *Endpoint) FetchJobApplicationComprehensive(c *gin.Context) {
 		Questions:      questions,
 		JobDescription: jobApplication.JobDescription,
 		CoverLetter:    coverLetter,
+		Resume: ResumeSummary{
+			Id:       jobApplication.Resume.IdExternal.String(),
+			FileName: jobApplication.Resume.FileName,
+		},
 	}})
 }

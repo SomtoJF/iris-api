@@ -124,6 +124,7 @@ func main() {
 		protected.POST("/jobs/:id/retry-application", jobEndpoint.RetryApplication)
 		protected.POST("/jobs/:id/cancel", jobEndpoint.CancelApplication)
 		protected.DELETE("/jobs/:id", jobEndpoint.DeleteApplication)
+		protected.PATCH("/jobs/:id", jobEndpoint.PatchJobApplication)
 		protected.GET("/jobs/:id/user-action", jobEndpoint.GetUserAction)
 		protected.GET("/jobs/:id/comprehensive", jobEndpoint.FetchJobApplicationComprehensive)
 		protected.GET("/jobs", jobEndpoint.FetchAllJobApplications)
