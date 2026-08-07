@@ -191,9 +191,9 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 }
 
 type FetchAllJobApplicationsRequest struct {
-	Page   int    `form:"page" binding:"required"`
-	Limit  int    `form:"limit" binding:"required"`
-	Search string `form:"search"`
+	Page      int    `form:"page" binding:"required"`
+	Limit     int    `form:"limit" binding:"required"`
+	Search    string `form:"search"`
 	Status    string `form:"status" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
 	StatusNot string `form:"status_not" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
 }
@@ -435,4 +435,59 @@ func (e *Endpoint) GetUserAction(c *gin.Context) {
 		WorkflowID:     userAction.WorkflowID,
 		SignalName:     "USER_ACTION_RESULT",
 	})
+}
+
+type JobApplicationComprehensiveResponse struct {
+	Id             string                          `json:"id"`
+	Url            string                          `json:"url"`
+	JobTitle       string                          `json:"jobTitle"`
+	CompanyName    string                          `json:"companyName"`
+	Status         string                          `json:"status"`
+	Questions      []model.JobApplicationQuestions `json:"questions"`
+	JobDescription string                          `json:"jobDescription"`
+	CoverLetter    *string                         `json:"coverLetter"`
+}
+
+// get /jobs/:id/comprehensive
+func (e *Endpoint) FetchJobApplicationComprehensive(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "FetchJobApplicationComprehensive")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		return
+	}
+
+	var jobApplication model.JobApplication
+	if err := e.db.Preload("JobApplicationData").Where("id_external = ? AND id_user = ? AND cover_letter_only = false", id, userId).First(&jobApplication).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+		return
+	}
+
+	var questions []model.JobApplicationQuestions
+	var coverLetter *string
+	if jobApplication.JobApplicationData != nil {
+		questions = jobApplication.JobApplicationData.Questions
+
+		if jobApplication.JobApplicationData.CoverLetter != nil {
+			coverLetter = jobApplication.JobApplicationData.CoverLetter
+		}
+
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": JobApplicationComprehensiveResponse{
+		Id:             jobApplication.IdExternal.String(),
+		Url:            jobApplication.Url,
+		JobTitle:       jobApplication.JobTitle,
+		CompanyName:    jobApplication.CompanyName,
+		Status:         string(jobApplication.Status),
+		Questions:      questions,
+		JobDescription: jobApplication.JobDescription,
+		CoverLetter:    coverLetter,
+	}})
 }
