@@ -146,6 +146,7 @@ func main() {
 		protected.POST("/jobs/search", jobSearchEndpoint.TriggerJobSearch)
 
 		protected.POST("/extension/initiate", extensionEndpoint.InitiateApplication)
+		protected.POST("/extension/application/:id/sync-data", extensionEndpoint.SyncApplicationData)
 
 		protected.POST("/coverletter", coverLetterEndpoint.CreateCoverLetter)
 		protected.POST("/coverletter/regenerate", coverLetterEndpoint.RegenerateCoverLetter)

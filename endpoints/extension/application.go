@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/SomtoJF/iris-api/model"
@@ -164,4 +165,160 @@ func (e *Endpoint) resolveResume(userId uint, externalId *string) (model.Resume,
 	}
 	err := e.db.Where("id_user = ? AND is_active = true AND deleted_at IS NULL", userId).First(&resume).Error
 	return resume, err
+}
+
+// POST /extension/application/:id/answer-questions
+
+type AnswerApplicationQuestionsRequest struct {
+	Questions []string `json:"questions" binding:"required"`
+}
+
+func (e *Endpoint) AnswerApplicationQuestions(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "AnswerApplicationQuestions")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var request AnswerApplicationQuestionsRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "AnswerApplicationQuestions", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+}
+
+// POST /extension/application/:id/sync-data
+
+type SyncApplicationDataRequest struct {
+	Questions   []model.JobApplicationQuestions `json:"questions" binding:"required"`
+	CoverLetter *string                         `json:"coverLetter"`
+}
+
+func (e *Endpoint) SyncApplicationData(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "SyncApplicationData")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var request SyncApplicationDataRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "SyncApplicationData", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var jobApplication model.JobApplication
+	if err := e.db.Preload("JobApplicationData").Where("id_user = ? AND id_external = ? AND deleted_at IS NULL", userId, c.Param("id")).First(&jobApplication).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+			return
+		}
+		e.logger.ErrorContext(c.Request.Context(), "failed to get job application", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get job application"})
+		return
+	}
+
+	mergedQuestions := mergeJobApplicationQuestions(jobApplication.JobApplicationData, request.Questions)
+
+	tx := e.db.Begin()
+	if tx.Error != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to begin sync transaction", "error", tx.Error)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync application data"})
+		return
+	}
+
+	var data model.JobApplicationData
+	err := tx.Where("id_job_application = ?", jobApplication.IdJobApplication).First(&data).Error
+	switch {
+	case err == nil:
+		updates := map[string]any{
+			"questions": mergedQuestions,
+		}
+		if request.CoverLetter != nil {
+			updates["cover_letter"] = request.CoverLetter
+		}
+		if err := tx.Model(&data).Updates(updates).Error; err != nil {
+			_ = tx.Rollback()
+			e.logger.ErrorContext(c.Request.Context(), "failed to update application data", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync application data"})
+			return
+		}
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		data = model.JobApplicationData{
+			UserId:           jobApplication.UserId,
+			JobApplicationId: jobApplication.IdJobApplication,
+			Questions:        mergedQuestions,
+			CoverLetter:      request.CoverLetter,
+		}
+		if err := tx.Create(&data).Error; err != nil {
+			_ = tx.Rollback()
+			e.logger.ErrorContext(c.Request.Context(), "failed to create application data", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync application data"})
+			return
+		}
+	default:
+		_ = tx.Rollback()
+		e.logger.ErrorContext(c.Request.Context(), "failed to get application data", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync application data"})
+		return
+	}
+
+	if err := tx.Model(&jobApplication).Update("updated_at", time.Now()).Error; err != nil {
+		_ = tx.Rollback()
+		e.logger.ErrorContext(c.Request.Context(), "failed to update job application", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync application data"})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to commit sync transaction", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync application data"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": "Application data synced"})
+}
+
+// mergeJobApplicationQuestions folds existing + incoming Q&A into one list, keyed by
+// trimmed case-insensitive question text so duplicates collapse to a single answer.
+func mergeJobApplicationQuestions(existing *model.JobApplicationData, incoming []model.JobApplicationQuestions) model.JobApplicationQuestionsList {
+	byKey := make(map[string]model.JobApplicationQuestions)
+	order := make([]string, 0)
+
+	upsert := func(q model.JobApplicationQuestions) {
+		trimmed := strings.TrimSpace(q.Question)
+		if trimmed == "" {
+			return
+		}
+		key := strings.ToLower(trimmed)
+		q.Question = trimmed
+		if prev, ok := byKey[key]; ok {
+			prev.Answer = q.Answer
+			prev.IsOptional = q.IsOptional
+			prev.Question = trimmed
+			byKey[key] = prev
+			return
+		}
+		byKey[key] = q
+		order = append(order, key)
+	}
+
+	if existing != nil {
+		for _, q := range existing.Questions {
+			upsert(q)
+		}
+	}
+	for _, q := range incoming {
+		upsert(q)
+	}
+
+	out := make(model.JobApplicationQuestionsList, 0, len(order))
+	for _, key := range order {
+		out = append(out, byKey[key])
+	}
+	return out
 }
