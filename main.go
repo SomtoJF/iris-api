@@ -5,6 +5,7 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/SomtoJF/iris-api/common"
 	"github.com/SomtoJF/iris-api/endpoints/auth"
@@ -73,8 +74,18 @@ func main() {
 		allowedOrigins = []string{"http://localhost:5173"}
 	}
 
+	// AllowOriginFunc: gin-contrib/cors returns 403 when Origin is set and not
+	// allowed. Extension side-panel fetches send Origin: chrome-extension://…;
+	// host_permissions only bypass browser CORS checks, not this server reject.
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     allowedOrigins,
+		AllowOriginFunc: func(origin string) bool {
+			for _, o := range allowedOrigins {
+				if o == origin {
+					return true
+				}
+			}
+			return strings.HasPrefix(origin, "chrome-extension://")
+		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
 		AllowCredentials: true,

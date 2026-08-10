@@ -2,6 +2,7 @@ package extension
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -80,7 +81,7 @@ func (e *Endpoint) InitiateApplication(c *gin.Context) {
 		return
 	}
 
-	workflowID := uuid.New().String()
+	workflowID := fmt.Sprintf("initiate-application-%s-%s", request.Url, uuid.New().String())
 	jobApplication := model.JobApplication{
 		Url:            request.Url,
 		JobTitle:       "Pending-Job-Title",
