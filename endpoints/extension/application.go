@@ -175,7 +175,8 @@ type AutofillApplicationQuestion struct {
 }
 
 type AutofillApplicationRequest struct {
-	Questions []AutofillApplicationQuestion `json:"questions" binding:"required"`
+	Questions    []AutofillApplicationQuestion `json:"questions" binding:"required"`
+	ContextUrls  []string                      `json:"contextUrls"`
 }
 
 type AutofillApplicationWorkflowQuestion struct {
@@ -194,6 +195,7 @@ type AutofillApplicationWorkflowInput struct {
 	IdUser           uint                                  `json:"id_user"`
 	IdJobApplication uint                                  `json:"id_job_application"`
 	Questions        []AutofillApplicationWorkflowQuestion `json:"questions"`
+	ContextUrls      []string                              `json:"context_urls"`
 }
 
 type AutofillApplicationWorkflowResponse struct {
@@ -247,6 +249,7 @@ func (e *Endpoint) AutofillApplication(c *gin.Context) {
 		IdUser:           userId,
 		IdJobApplication: jobApplication.IdJobApplication,
 		Questions:        workflowQuestions,
+		ContextUrls:      request.ContextUrls,
 	})
 	if err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to start autofill workflow", "error", err)
