@@ -167,26 +167,170 @@ func (e *Endpoint) resolveResume(userId uint, externalId *string) (model.Resume,
 	return resume, err
 }
 
-// POST /extension/application/:id/answer-questions
+// POST /extension/application/:id/autofill
 
-type AnswerApplicationQuestionsRequest struct {
-	Questions []string `json:"questions" binding:"required"`
+type AutofillApplicationQuestion struct {
+	Question string `json:"question"`
+	Id       uint   `json:"id"`
 }
 
-func (e *Endpoint) AnswerApplicationQuestions(c *gin.Context) {
+type AutofillApplicationRequest struct {
+	Questions []AutofillApplicationQuestion `json:"questions" binding:"required"`
+}
+
+type AutofillApplicationWorkflowQuestion struct {
+	Id       uint   `json:"id"`
+	Question string `json:"question"`
+}
+
+type AutofillApplicationWorkflowAnsweredQuestion struct {
+	Id       uint   `json:"id"`
+	Question string `json:"question"`
+	Answer   string `json:"answer"`
+}
+
+type AutofillApplicationWorkflowInput struct {
+	Url              string                                `json:"url"`
+	IdUser           uint                                  `json:"id_user"`
+	IdJobApplication uint                                  `json:"id_job_application"`
+	Questions        []AutofillApplicationWorkflowQuestion `json:"questions"`
+}
+
+type AutofillApplicationWorkflowResponse struct {
+	Questions []AutofillApplicationWorkflowAnsweredQuestion `json:"questions"`
+}
+
+type AutofillApplicationResponse struct {
+	Questions []AutofillApplicationWorkflowAnsweredQuestion `json:"questions"`
+}
+
+func (e *Endpoint) AutofillApplication(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
-		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "AnswerApplicationQuestions")
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "AutofillApplication")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
-	var request AnswerApplicationQuestionsRequest
+	var request AutofillApplicationRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
-		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "AnswerApplicationQuestions", "error", err)
+		e.logger.WarnContext(c.Request.Context(), "failed to bind JSON", "handler", "AutofillApplication", "error", err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
+	var jobApplication model.JobApplication
+	if err := e.db.Preload("JobApplicationData").Where("id_user = ? AND id_external = ? AND deleted_at IS NULL", userId, c.Param("id")).First(&jobApplication).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+			return
+		}
+		e.logger.ErrorContext(c.Request.Context(), "failed to get job application", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get job application"})
+		return
+	}
+
+	workflowQuestions := make([]AutofillApplicationWorkflowQuestion, 0, len(request.Questions))
+	for _, q := range request.Questions {
+		workflowQuestions = append(workflowQuestions, AutofillApplicationWorkflowQuestion{
+			Id:       q.Id,
+			Question: q.Question,
+		})
+	}
+
+	workflowID := fmt.Sprintf("autofill-application-%s-%s", jobApplication.IdExternal.String(), uuid.New().String())
+	run, err := e.temporalClient.ExecuteWorkflow(c.Request.Context(), client.StartWorkflowOptions{
+		ID:        workflowID,
+		TaskQueue: string(e.taskQueueName),
+	}, "AutofillApplicationWorkflow", AutofillApplicationWorkflowInput{
+		Url:              jobApplication.Url,
+		IdUser:           userId,
+		IdJobApplication: jobApplication.IdJobApplication,
+		Questions:        workflowQuestions,
+	})
+	if err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to start autofill workflow", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start autofill workflow"})
+		return
+	}
+
+	var workflowResponse AutofillApplicationWorkflowResponse
+	if err := run.Get(c.Request.Context(), &workflowResponse); err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to get autofill workflow result", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get autofill workflow result"})
+		return
+	}
+
+	incoming := make([]model.JobApplicationQuestions, 0, len(workflowResponse.Questions))
+	for _, q := range workflowResponse.Questions {
+		if strings.TrimSpace(q.Answer) == "" {
+			continue
+		}
+		incoming = append(incoming, model.JobApplicationQuestions{
+			Question:   q.Question,
+			Answer:     q.Answer,
+			IsOptional: false,
+		})
+	}
+
+	if len(incoming) > 0 {
+		mergedQuestions := mergeJobApplicationQuestions(jobApplication.JobApplicationData, incoming)
+
+		tx := e.db.Begin()
+		if tx.Error != nil {
+			e.logger.ErrorContext(c.Request.Context(), "failed to begin autofill transaction", "error", tx.Error)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save application data"})
+			return
+		}
+
+		var data model.JobApplicationData
+		err := tx.Where("id_job_application = ?", jobApplication.IdJobApplication).First(&data).Error
+		switch {
+		case err == nil:
+			if err := tx.Model(&data).Updates(map[string]any{
+				"questions": mergedQuestions,
+			}).Error; err != nil {
+				_ = tx.Rollback()
+				e.logger.ErrorContext(c.Request.Context(), "failed to update application data", "error", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save application data"})
+				return
+			}
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			data = model.JobApplicationData{
+				UserId:           jobApplication.UserId,
+				JobApplicationId: jobApplication.IdJobApplication,
+				Questions:        mergedQuestions,
+			}
+			if err := tx.Create(&data).Error; err != nil {
+				_ = tx.Rollback()
+				e.logger.ErrorContext(c.Request.Context(), "failed to create application data", "error", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save application data"})
+				return
+			}
+		default:
+			_ = tx.Rollback()
+			e.logger.ErrorContext(c.Request.Context(), "failed to get application data", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save application data"})
+			return
+		}
+
+		if err := tx.Model(&jobApplication).Update("updated_at", time.Now()).Error; err != nil {
+			_ = tx.Rollback()
+			e.logger.ErrorContext(c.Request.Context(), "failed to update job application", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save application data"})
+			return
+		}
+
+		if err := tx.Commit().Error; err != nil {
+			e.logger.ErrorContext(c.Request.Context(), "failed to commit autofill transaction", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save application data"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": AutofillApplicationResponse{
+		Questions: workflowResponse.Questions,
+	}})
 }
 
 // POST /extension/application/:id/sync-data
