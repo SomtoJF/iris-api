@@ -148,6 +148,7 @@ func main() {
 		protected.POST("/extension/initiate", extensionEndpoint.InitiateApplication)
 		protected.POST("/extension/application/:id/autofill", extensionEndpoint.AutofillApplication)
 		protected.POST("/extension/application/:id/sync-data", extensionEndpoint.SyncApplicationData)
+		protected.POST("/extension/application/:id/mark-as-applied", extensionEndpoint.MarkAsApplied) // extension mark-as-applied
 
 		protected.POST("/coverletter", coverLetterEndpoint.CreateCoverLetter)
 		protected.POST("/coverletter/regenerate", coverLetterEndpoint.RegenerateCoverLetter)
