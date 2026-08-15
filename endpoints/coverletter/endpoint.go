@@ -163,7 +163,7 @@ func (e *Endpoint) RegenerateCoverLetter(c *gin.Context) {
 
 	workflowId := newCoverLetterWorkflowID()
 	if err := e.db.Model(&jobApplication).Updates(map[string]any{
-		"status":      model.JobApplicationStatusPending,
+		"status":      model.JobApplicationStatusProcessing,
 		"workflow_id": &workflowId,
 	}).Error; err != nil {
 		e.logger.ErrorContext(ctx, "failed to update cover letter application on regenerate", "error", err)
@@ -178,12 +178,12 @@ func (e *Endpoint) RegenerateCoverLetter(c *gin.Context) {
 
 	// Regeneration takes minutes; run it in the background and return immediately.
 	// Completion is signalled to the frontend via a realtime event.
-	jobApplication.Status = model.JobApplicationStatusPending
+	jobApplication.Status = model.JobApplicationStatusProcessing
 	e.generateCoverLetterAsync(userId, jobApplication, workflowId, edit, input.UltraWrite)
 
 	c.JSON(http.StatusAccepted, CreateCoverLetterResponse{
 		JobApplicationId: jobApplication.IdExternal.String(),
-		Status:           model.JobApplicationStatusPending,
+		Status:           model.JobApplicationStatusProcessing,
 	})
 }
 
@@ -353,7 +353,7 @@ func (e *Endpoint) createCoverLetterApplication(userId, resumeId uint, input Cre
 		CompanyName:     input.CompanyName,
 		JobDescription:  input.JobDescription,
 		Url:             input.Url,
-		Status:          model.JobApplicationStatusPending,
+		Status:          model.JobApplicationStatusProcessing,
 		CoverLetterOnly: true,
 		WorkflowID:      &workflowId,
 	}

@@ -1,6 +1,7 @@
 package extension
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +14,8 @@ import (
 	"github.com/SomtoJF/iris-api/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
 )
@@ -88,10 +91,9 @@ func (e *Endpoint) InitiateApplication(c *gin.Context) {
 		JobTitle:       "Pending-Job-Title",
 		CompanyName:    "Pending-Company-Name",
 		JobDescription: "Pending-Job-Description",
-		Status:         model.JobApplicationStatusPending,
+		Status:         model.JobApplicationStatusProcessing,
 		UserId:         userId,
 		ResumeId:       resume.IdResume,
-		WorkflowID:     &workflowID,
 	}
 	if err := e.db.Create(&jobApplication).Error; err != nil {
 		if utils.IsUniqueConstraintViolation(err) {
@@ -175,8 +177,8 @@ type AutofillApplicationQuestion struct {
 }
 
 type AutofillApplicationRequest struct {
-	Questions    []AutofillApplicationQuestion `json:"questions" binding:"required"`
-	ContextUrls  []string                      `json:"contextUrls"`
+	Questions   []AutofillApplicationQuestion `json:"questions" binding:"required"`
+	ContextUrls []string                      `json:"contextUrls"`
 }
 
 type AutofillApplicationWorkflowQuestion struct {
@@ -428,6 +430,84 @@ func (e *Endpoint) SyncApplicationData(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": "Application data synced"})
+}
+
+// post extension/application/:id/mark-as-applied
+func (e *Endpoint) MarkAsApplied(c *gin.Context) {
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "MarkAsApplied")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		return
+	}
+
+	var jobApplication model.JobApplication
+	if err := e.db.Where("id_external = ? AND id_user = ?", id, userId).First(&jobApplication).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+		return
+	}
+
+	if jobApplication.Status == model.JobApplicationStatusApplied {
+		c.JSON(http.StatusOK, gin.H{"message": "Application marked as applied"})
+		return
+	}
+
+	if jobApplication.Status != model.JobApplicationStatusProcessing {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Application is not currently processing"})
+		return
+	}
+
+	if jobApplication.WorkflowID != nil && strings.TrimSpace(*jobApplication.WorkflowID) != "" {
+		running, err := e.jobApplicationWorkflowIsRunning(c.Request.Context(), *jobApplication.WorkflowID)
+		if err != nil {
+			e.logger.ErrorContext(c.Request.Context(), "failed to describe job application workflow", "error", err, "workflow_id", *jobApplication.WorkflowID)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check application workflow status"})
+			return
+		}
+		if running {
+			c.JSON(http.StatusConflict, gin.H{"error": "Application workflow is still running"})
+			return
+		}
+	}
+
+	now := time.Now()
+
+	if err := e.db.Model(&jobApplication).Updates(map[string]any{
+		"status":     model.JobApplicationStatusApplied,
+		"applied_at": &now,
+	}).Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to mark application as applied", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to mark application as applied"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Application marked as applied"})
+}
+
+func (e *Endpoint) jobApplicationWorkflowIsRunning(ctx context.Context, workflowID string) (bool, error) {
+	desc, err := e.temporalClient.DescribeWorkflowExecution(ctx, workflowID, "")
+	if err != nil {
+		var notFound *serviceerror.NotFound
+		if errors.As(err, &notFound) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	info := desc.GetWorkflowExecutionInfo()
+	if info == nil {
+		return false, nil
+	}
+	if info.GetType().GetName() != "JobApplicationWorkflow" {
+		return false, nil
+	}
+	return info.GetStatus() == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING, nil
 }
 
 // mergeJobApplicationQuestions folds existing + incoming Q&A into one list, keyed by

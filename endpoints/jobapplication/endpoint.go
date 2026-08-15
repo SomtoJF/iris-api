@@ -90,7 +90,7 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		JobTitle:       "Pending-Job-Title",
 		CompanyName:    "Pending-Company-Name",
 		JobDescription: "Pending-Job-Description",
-		Status:         model.JobApplicationStatusPending,
+		Status:         model.JobApplicationStatusProcessing,
 		UserId:         userId,
 		ResumeId:       resume.IdResume,
 		WorkflowID:     &workflowId,
@@ -154,7 +154,7 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 	workflowId := fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String())
 
 	if err := e.db.Model(&jobApplication).Updates(map[string]any{
-		"status":              model.JobApplicationStatusPending,
+		"status":              model.JobApplicationStatusProcessing,
 		"workflow_id":         &workflowId,
 		"created_at":          time.Now(),
 		"failure_reason":      nil,
@@ -205,6 +205,7 @@ type JobApplication struct {
 	CompanyName        string                     `json:"companyName"`
 	Status             model.JobApplicationStatus `json:"status"`
 	HasApplicationData bool                       `json:"hasApplicationData"`
+	AppliedAt          *time.Time                 `json:"appliedAt,omitempty"`
 	FailureReason      *string                    `json:"failureReason,omitempty"`
 	CancellationReason *string                    `json:"cancellationReason,omitempty"`
 	HaltReason         *string                    `json:"haltReason,omitempty"`
@@ -272,6 +273,7 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 			FailureReason:      jobApplication.FailureReason,
 			CancellationReason: jobApplication.CancellationReason,
 			HaltReason:         jobApplication.HaltReason,
+			AppliedAt:          jobApplication.AppliedAt,
 			CreatedAt:          jobApplication.CreatedAt,
 			UpdatedAt:          jobApplication.UpdatedAt,
 		})
@@ -326,7 +328,7 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 		return
 	}
 
-	if jobApplication.Status != model.JobApplicationStatusPending {
+	if jobApplication.Status != model.JobApplicationStatusProcessing {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Application is not currently processing"})
 		return
 	}
@@ -505,6 +507,7 @@ type ResumeSummary struct {
 
 type JobApplicationComprehensiveResponse struct {
 	Id             string                          `json:"id"`
+	AppliedAt      *time.Time                      `json:"appliedAt,omitempty"`
 	Url            string                          `json:"url"`
 	JobTitle       string                          `json:"jobTitle"`
 	CompanyName    string                          `json:"companyName"`
@@ -556,6 +559,7 @@ func (e *Endpoint) FetchJobApplicationComprehensive(c *gin.Context) {
 		Questions:      questions,
 		JobDescription: jobApplication.JobDescription,
 		CoverLetter:    coverLetter,
+		AppliedAt:      jobApplication.AppliedAt,
 		Resume: ResumeSummary{
 			Id:       jobApplication.Resume.IdExternal.String(),
 			FileName: jobApplication.Resume.FileName,
