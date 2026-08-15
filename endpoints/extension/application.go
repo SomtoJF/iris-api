@@ -458,11 +458,6 @@ func (e *Endpoint) MarkAsApplied(c *gin.Context) {
 		return
 	}
 
-	if jobApplication.Status != model.JobApplicationStatusProcessing {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Application is not currently processing"})
-		return
-	}
-
 	if jobApplication.WorkflowID != nil && strings.TrimSpace(*jobApplication.WorkflowID) != "" {
 		running, err := e.jobApplicationWorkflowIsRunning(c.Request.Context(), *jobApplication.WorkflowID)
 		if err != nil {
