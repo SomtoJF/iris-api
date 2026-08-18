@@ -34,13 +34,27 @@ func NewEndpoint(db *gorm.DB, s3Manager *s3pkg.S3Manager, logger *slog.Logger, t
 }
 
 type ResumeDTO struct {
-	Id        string    `json:"id"`
-	FileName  string    `json:"fileName"`
-	FileSize  int64     `json:"fileSize"`
-	FileKey   string    `json:"fileKey"`
-	IsActive  bool      `json:"isActive"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Id          string    `json:"id"`
+	DisplayName *string   `json:"displayName,omitempty"`
+	FileName    string    `json:"fileName"`
+	FileSize    int64     `json:"fileSize"`
+	FileKey     string    `json:"fileKey"`
+	IsActive    bool      `json:"isActive"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+func toResumeDTO(resume model.Resume) ResumeDTO {
+	return ResumeDTO{
+		Id:          resume.IdExternal.String(),
+		DisplayName: resume.DisplayName,
+		FileName:    resume.FileName,
+		FileSize:    resume.FileSize,
+		FileKey:     resume.FileKey,
+		IsActive:    resume.IsActive,
+		CreatedAt:   resume.CreatedAt,
+		UpdatedAt:   resume.UpdatedAt,
+	}
 }
 
 func (e *Endpoint) FetchResumes(c *gin.Context) {
@@ -60,15 +74,7 @@ func (e *Endpoint) FetchResumes(c *gin.Context) {
 
 	resumeDTOs := make([]ResumeDTO, 0, len(resumes))
 	for _, resume := range resumes {
-		resumeDTOs = append(resumeDTOs, ResumeDTO{
-			Id:        resume.IdExternal.String(),
-			FileName:  resume.FileName,
-			FileSize:  resume.FileSize,
-			FileKey:   resume.FileKey,
-			IsActive:  resume.IsActive,
-			CreatedAt: resume.CreatedAt,
-			UpdatedAt: resume.UpdatedAt,
-		})
+		resumeDTOs = append(resumeDTOs, toResumeDTO(resume))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": resumeDTOs})
@@ -131,6 +137,61 @@ func (e *Endpoint) SetResumeAsActive(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Resume set as active"})
 }
 
+type UpdateDisplayNameInput struct {
+	DisplayName string `json:"displayName"`
+}
+
+func (e *Endpoint) UpdateDisplayName(c *gin.Context) {
+	id := c.Param("id")
+	userId := c.GetUint("userId")
+	if userId == 0 {
+		e.logger.InfoContext(c.Request.Context(), "unauthorized", "handler", "UpdateDisplayName")
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var input UpdateDisplayNameInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		e.logger.WarnContext(c.Request.Context(), "invalid request body", "error", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+
+	var resume model.Resume
+	if err := e.db.Where("id_external = ? AND deleted_at IS NULL AND id_user = ?", id, userId).First(&resume).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			e.logger.WarnContext(c.Request.Context(), "resume not found", "error", err)
+			c.JSON(http.StatusNotFound, gin.H{"error": "Resume not found"})
+			return
+		}
+		e.logger.ErrorContext(c.Request.Context(), "failed to find resume", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find resume"})
+		return
+	}
+
+	displayName := strings.TrimSpace(input.DisplayName)
+	var displayNameValue any
+	if displayName == "" {
+		displayNameValue = nil
+	} else {
+		displayNameValue = displayName
+	}
+
+	if err := e.db.Model(&resume).Update("display_name", displayNameValue).Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to update display name", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update display name"})
+		return
+	}
+
+	if displayName == "" {
+		resume.DisplayName = nil
+	} else {
+		resume.DisplayName = &displayName
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": toResumeDTO(resume)})
+}
+
 func (e *Endpoint) UploadResume(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
@@ -148,6 +209,11 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 	defer file.Close()
 
 	shouldProcessResume := c.PostForm("processResume") == "true"
+	displayName := strings.TrimSpace(c.PostForm("displayName"))
+	var displayNamePtr *string
+	if displayName != "" {
+		displayNamePtr = &displayName
+	}
 
 	// Validate file extension
 	ext := strings.ToLower(filepath.Ext(header.Filename))
@@ -203,6 +269,7 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 	resume := model.Resume{
 		IdExternal:   resumeUUID,
 		UserId:       userId,
+		DisplayName:  displayNamePtr,
 		FileKey:      s3Key,
 		FileName:     header.Filename,
 		FileSize:     header.Size,
@@ -230,15 +297,7 @@ func (e *Endpoint) UploadResume(c *gin.Context) {
 		}
 	}
 
-	c.JSON(http.StatusCreated, gin.H{"data": ResumeDTO{
-		Id:        resume.IdExternal.String(),
-		FileName:  resume.FileName,
-		FileSize:  resume.FileSize,
-		FileKey:   resume.FileKey,
-		IsActive:  resume.IsActive,
-		CreatedAt: resume.CreatedAt,
-		UpdatedAt: resume.UpdatedAt,
-	}})
+	c.JSON(http.StatusCreated, gin.H{"data": toResumeDTO(resume)})
 }
 
 type processResumeWorkflowInput struct {

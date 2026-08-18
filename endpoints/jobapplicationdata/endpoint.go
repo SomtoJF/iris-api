@@ -20,9 +20,10 @@ func NewEndpoint(db *gorm.DB, logger *slog.Logger) *Endpoint {
 }
 
 type ResumeDTO struct {
-	Id       string `json:"id"`
-	FileName string `json:"fileName"`
-	FileSize int64  `json:"fileSize"`
+	Id          string  `json:"id"`
+	DisplayName *string `json:"displayName,omitempty"`
+	FileName    string  `json:"fileName"`
+	FileSize    int64   `json:"fileSize"`
 }
 
 type JobApplicationDataResponse struct {
@@ -72,9 +73,10 @@ func (e *Endpoint) GetJobApplicationData(c *gin.Context) {
 		Questions:   data.Questions,
 		CoverLetter: data.CoverLetter,
 		Resume: ResumeDTO{
-			Id:       jobApp.Resume.IdExternal.String(),
-			FileName: jobApp.Resume.FileName,
-			FileSize: jobApp.Resume.FileSize,
+			Id:          jobApp.Resume.IdExternal.String(),
+			DisplayName: jobApp.Resume.DisplayName,
+			FileName:    jobApp.Resume.FileName,
+			FileSize:    jobApp.Resume.FileSize,
 		},
 	}})
 }

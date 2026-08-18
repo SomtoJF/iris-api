@@ -160,6 +160,7 @@ func main() {
 		protected.GET("/resumes", resumeEndpoint.FetchResumes)
 		protected.POST("/resumes", resumeEndpoint.UploadResume)
 		protected.PUT("/resumes/:id/activate", resumeEndpoint.SetResumeAsActive)
+		protected.PUT("/resumes/:id/display-name", resumeEndpoint.UpdateDisplayName)
 		protected.DELETE("/resumes/:id", resumeEndpoint.DeleteResume)
 		protected.GET("/resumes/:id/download", resumeEndpoint.GetResumeDownloadUrl)
 

@@ -501,8 +501,9 @@ func (e *Endpoint) GetUserAction(c *gin.Context) {
 }
 
 type ResumeSummary struct {
-	Id       string `json:"id"`
-	FileName string `json:"fileName"`
+	Id          string  `json:"id"`
+	DisplayName *string `json:"displayName,omitempty"`
+	FileName    string  `json:"fileName"`
 }
 
 type JobApplicationComprehensiveResponse struct {
@@ -561,8 +562,9 @@ func (e *Endpoint) FetchJobApplicationComprehensive(c *gin.Context) {
 		CoverLetter:    coverLetter,
 		AppliedAt:      jobApplication.AppliedAt,
 		Resume: ResumeSummary{
-			Id:       jobApplication.Resume.IdExternal.String(),
-			FileName: jobApplication.Resume.FileName,
+			Id:          jobApplication.Resume.IdExternal.String(),
+			DisplayName: jobApplication.Resume.DisplayName,
+			FileName:    jobApplication.Resume.FileName,
 		},
 	}})
 }
