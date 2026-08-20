@@ -356,7 +356,10 @@ func (e *Endpoint) DeleteResume(c *gin.Context) {
 
 	// Soft delete in database
 	now := time.Now()
-	if err := e.db.Model(&resume).Update("deleted_at", now).Error; err != nil {
+	if err := e.db.Model(&resume).Updates(map[string]any{
+		"deleted_at": now,
+		"is_active":  false,
+	}).Error; err != nil {
 		e.logger.ErrorContext(ctx, "failed to delete resume", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete resume"})
 		return

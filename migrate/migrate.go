@@ -38,6 +38,7 @@ func main() {
 	// if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
 	// 	log.Fatal(err)
 	// }
+	// log.Println("Migrated table job application")
 
 	// log.Println("Starting migration on table job application profile")
 	// if err := db.AutoMigrate(&model.JobApplicationProfile{}); err != nil {
@@ -48,7 +49,9 @@ func main() {
 	if err := db.AutoMigrate(&model.Resume{}); err != nil {
 		log.Fatal(err)
 	}
+	log.Println("Migrated table resume")
 
+	// ensureOneActiveResumePerUser()
 	// log.Println("Starting migration on table user action")
 	// if err := db.AutoMigrate(&model.UserAction{}); err != nil {
 	// 	log.Fatal(err)
@@ -111,4 +114,60 @@ func dropAllApplicationTables() {
 		log.Fatal(err)
 	}
 	log.Println("Dropped all application tables")
+}
+
+// ensureOneActiveResumePerUser deactivates all live resumes per user, then activates
+// the most recently created already-active resume, or the most recently created
+// resume if none are active.
+func ensureOneActiveResumePerUser() {
+	log.Println("Ensuring one active resume per user")
+
+	var userIDs []uint
+	if err := db.Model(&model.Resume{}).
+		Where("deleted_at IS NULL").
+		Distinct("id_user").
+		Pluck("id_user", &userIDs).Error; err != nil {
+		log.Fatal(err)
+	}
+
+	for _, userID := range userIDs {
+		err := db.Transaction(func(tx *gorm.DB) error {
+			var resumes []model.Resume
+			if err := tx.Where("id_user = ? AND deleted_at IS NULL", userID).
+				Order("created_at DESC, id_resume DESC").
+				Find(&resumes).Error; err != nil {
+				return err
+			}
+			if len(resumes) == 0 {
+				return nil
+			}
+
+			chosenID := resumes[0].IdResume
+			for _, r := range resumes {
+				if r.IsActive {
+					chosenID = r.IdResume
+					break
+				}
+			}
+
+			if err := tx.Model(&model.Resume{}).
+				Where("id_user = ? AND deleted_at IS NULL", userID).
+				Update("is_active", false).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.Resume{}).
+				Where("id_resume = ?", chosenID).
+				Update("is_active", true).Error; err != nil {
+				return err
+			}
+
+			log.Printf("user %d: set resume %d as active", userID, chosenID)
+			return nil
+		})
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	log.Println("Finished ensuring one active resume per user")
 }
