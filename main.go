@@ -11,6 +11,7 @@ import (
 	"github.com/SomtoJF/iris-api/endpoints/auth"
 	"github.com/SomtoJF/iris-api/endpoints/costtracking"
 	"github.com/SomtoJF/iris-api/endpoints/coverletter"
+	extensioncoverletter "github.com/SomtoJF/iris-api/endpoints/coverletter/extension"
 	"github.com/SomtoJF/iris-api/endpoints/health"
 	"github.com/SomtoJF/iris-api/endpoints/issue"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplication"
@@ -111,6 +112,7 @@ func main() {
 	issueEndpoint := issue.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 	jobApplicationDataEndpoint := jobapplicationdata.NewEndpoint(db, logger)
 	coverLetterEndpoint := coverletter.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName, redisPubSub)
+	extensionCoverLetterEndpoint := extensioncoverletter.NewEndpoint(db, logger, coverLetterEndpoint)
 	extensionJobApplicationEndpoint := extensionjobapplication.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 
 	authMiddleware := verifyauth.NewMiddleware(db)
@@ -149,11 +151,12 @@ func main() {
 		protected.POST("/extension/application/:id/autofill", extensionJobApplicationEndpoint.AutofillApplication)
 		protected.POST("/extension/application/:id/sync-data", extensionJobApplicationEndpoint.SyncApplicationData)
 		protected.POST("/extension/application/:id/mark-as-applied", extensionJobApplicationEndpoint.MarkAsApplied) // extension mark-as-applied
+		protected.POST("/extension/application/:id/generate-cover-letter", extensionCoverLetterEndpoint.GenerateCoverLetter)
 
 		protected.POST("/coverletter", coverLetterEndpoint.CreateCoverLetter)
 		protected.POST("/coverletter/regenerate", coverLetterEndpoint.RegenerateCoverLetter)
 		protected.GET("/coverletter", coverLetterEndpoint.GetCoverLetters)
-		protected.GET("/coverletter/job-application/:jobApplicationId", coverLetterEndpoint.GetCoverLetter)
+		protected.GET("/coverletter/:id", coverLetterEndpoint.GetCoverLetter)
 
 		protected.GET("/realtime/events", realtimeEventsEndpoint.StreamEvents)
 

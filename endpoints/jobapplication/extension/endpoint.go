@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/SomtoJF/iris-api/endpoints/coverletter"
 	"github.com/SomtoJF/iris-api/model"
 	"github.com/SomtoJF/iris-api/temporal"
 	"github.com/SomtoJF/iris-api/utils"
@@ -384,13 +385,9 @@ func (e *Endpoint) SyncApplicationData(c *gin.Context) {
 	err := tx.Where("id_job_application = ?", jobApplication.IdJobApplication).First(&data).Error
 	switch {
 	case err == nil:
-		updates := map[string]any{
+		if err := tx.Model(&data).Updates(map[string]any{
 			"questions": mergedQuestions,
-		}
-		if request.CoverLetter != nil {
-			updates["cover_letter"] = request.CoverLetter
-		}
-		if err := tx.Model(&data).Updates(updates).Error; err != nil {
+		}).Error; err != nil {
 			_ = tx.Rollback()
 			e.logger.ErrorContext(c.Request.Context(), "failed to update application data", "error", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync application data"})
@@ -401,7 +398,6 @@ func (e *Endpoint) SyncApplicationData(c *gin.Context) {
 			UserId:           jobApplication.UserId,
 			JobApplicationId: jobApplication.IdJobApplication,
 			Questions:        mergedQuestions,
-			CoverLetter:      request.CoverLetter,
 		}
 		if err := tx.Create(&data).Error; err != nil {
 			_ = tx.Rollback()
@@ -414,6 +410,34 @@ func (e *Endpoint) SyncApplicationData(c *gin.Context) {
 		e.logger.ErrorContext(c.Request.Context(), "failed to get application data", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync application data"})
 		return
+	}
+
+	if request.CoverLetter != nil {
+		var existing model.CoverLetter
+		err := tx.Where("id_job_application = ?", jobApplication.IdJobApplication).First(&existing).Error
+		switch {
+		case err == nil && existing.Status == model.CoverLetterStatusProcessing:
+			// An in-flight generation owns this row; don't clobber it with a sync.
+		case err == nil || errors.Is(err, gorm.ErrRecordNotFound):
+			if _, err := coverletter.UpsertAttachedCoverLetter(
+				tx,
+				jobApplication,
+				jobApplication.ResumeId,
+				model.CoverLetterStatusReady,
+				nil,
+				request.CoverLetter,
+			); err != nil {
+				_ = tx.Rollback()
+				e.logger.ErrorContext(c.Request.Context(), "failed to upsert attached cover letter", "error", err)
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync application data"})
+				return
+			}
+		default:
+			_ = tx.Rollback()
+			e.logger.ErrorContext(c.Request.Context(), "failed to load attached cover letter", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to sync application data"})
+			return
+		}
 	}
 
 	if err := tx.Model(&jobApplication).Update("updated_at", time.Now()).Error; err != nil {

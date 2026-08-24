@@ -236,7 +236,7 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	}
 
 	baseQuery := e.db.Model(&model.JobApplication{}).
-		Where("id_user = ? AND cover_letter_only = false AND deleted_at IS NULL", userId).
+		Where("id_user = ? AND deleted_at IS NULL", userId).
 		Preload("JobApplicationData")
 	if request.Search != "" {
 		baseQuery = baseQuery.Where("job_title LIKE ? OR company_name LIKE ?", "%"+request.Search+"%", "%"+request.Search+"%")
@@ -560,7 +560,7 @@ func (e *Endpoint) FetchJobApplicationComprehensive(c *gin.Context) {
 	}
 
 	var jobApplication model.JobApplication
-	if err := e.db.Preload("JobApplicationData").Preload("Resume").Where("id_external = ? AND id_user = ? AND cover_letter_only = false", id, userId).First(&jobApplication).Error; err != nil {
+	if err := e.db.Preload("JobApplicationData").Preload("CoverLetter").Preload("Resume").Where("id_external = ? AND id_user = ?", id, userId).First(&jobApplication).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
 		return
 	}
@@ -569,11 +569,9 @@ func (e *Endpoint) FetchJobApplicationComprehensive(c *gin.Context) {
 	var coverLetter *string
 	if jobApplication.JobApplicationData != nil {
 		questions = jobApplication.JobApplicationData.Questions
-
-		if jobApplication.JobApplicationData.CoverLetter != nil {
-			coverLetter = jobApplication.JobApplicationData.CoverLetter
-		}
-
+	}
+	if jobApplication.CoverLetter != nil && jobApplication.CoverLetter.Body != nil {
+		coverLetter = jobApplication.CoverLetter.Body
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": JobApplicationComprehensiveResponse{

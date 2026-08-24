@@ -1,9 +1,7 @@
 package coverletter
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
@@ -18,8 +16,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const coverLetterTimeout = 10 * time.Minute
-
 type Endpoint struct {
 	db             *gorm.DB
 	temporalClient client.Client
@@ -30,23 +26,6 @@ type Endpoint struct {
 
 func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger, taskQueueName temporal.TaskQueueName, redisPubSub *redispubsub.RedisPubSub) *Endpoint {
 	return &Endpoint{db: db, temporalClient: temporalClient, logger: logger, taskQueueName: taskQueueName, redisPubSub: redisPubSub}
-}
-
-// coverLetterWorkflowInput mirrors the worker's coverletter.CoverLetterWorkflowInput.
-// Only IdJobApplication + IdUser are needed for the standalone (non-typing) path.
-type coverLetterWorkflowInput struct {
-	IdJobApplication uint              `json:"id_job_application"`
-	IdUser           uint              `json:"id_user"`
-	WorkflowID       *string           `json:"workflow_id,omitempty"`
-	ElementIndex     *int              `json:"element_index,omitempty"`
-	EditInstructions *editInstructions `json:"edit_instructions,omitempty"`
-	// UltraWrite only applies in edit mode (EditInstructions set): true runs the
-	// full analysis write instead of the lightweight edit.
-	UltraWrite bool `json:"ultra_write,omitempty"`
-}
-
-type editInstructions struct {
-	Instructions string `json:"instructions"`
 }
 
 type CreateCoverLetterInput struct {
@@ -61,8 +40,8 @@ type CreateCoverLetterInput struct {
 // kicked off in the background. The cover letter body is delivered later via a
 // COVER_LETTER_READY realtime event, not in this response.
 type CreateCoverLetterResponse struct {
-	JobApplicationId string                     `json:"jobApplicationId"`
-	Status           model.JobApplicationStatus `json:"status"`
+	Id     string                  `json:"id"`
+	Status model.CoverLetterStatus `json:"status"`
 }
 
 // POST /coverletter
@@ -83,8 +62,6 @@ func (e *Endpoint) CreateCoverLetter(c *gin.Context) {
 		return
 	}
 
-	// Pin the resume on the JobApplication at creation: the requested resume when
-	// provided, otherwise the user's active resume.
 	resume, err := e.resolveResume(userId, input.ResumeId)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -96,30 +73,28 @@ func (e *Endpoint) CreateCoverLetter(c *gin.Context) {
 		return
 	}
 
-	jobApplication, err := e.createCoverLetterApplication(userId, resume.IdResume, input)
+	coverLetter, err := e.createStandaloneCoverLetter(userId, resume.IdResume, input)
 	if err != nil {
 		if utils.IsUniqueConstraintViolation(err) {
-			e.logger.WarnContext(ctx, "cover letter application duplicate key", "error", err)
-			c.JSON(http.StatusConflict, gin.H{"error": "Cover letter application already exists"})
+			e.logger.WarnContext(ctx, "cover letter duplicate key", "error", err)
+			c.JSON(http.StatusConflict, gin.H{"error": "Cover letter already exists"})
 			return
 		}
-		e.logger.ErrorContext(ctx, "failed to create cover letter application", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create cover letter application"})
+		e.logger.ErrorContext(ctx, "failed to create cover letter", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create cover letter"})
 		return
 	}
 
-	// Generation takes minutes; run it in the background and return immediately.
-	// Completion is signalled to the frontend via a realtime event.
-	e.generateCoverLetterAsync(userId, jobApplication, *jobApplication.WorkflowID, nil, false)
+	e.GenerateCoverLetterAsync(userId, coverLetter, *coverLetter.WorkflowID, nil, false)
 
 	c.JSON(http.StatusAccepted, CreateCoverLetterResponse{
-		JobApplicationId: jobApplication.IdExternal.String(),
-		Status:           jobApplication.Status,
+		Id:     coverLetter.IdExternal.String(),
+		Status: coverLetter.Status,
 	})
 }
 
 type RegenerateCoverLetterInput struct {
-	JobApplicationId string `json:"jobApplicationId" binding:"required"`
+	Id               string `json:"id" binding:"required"`
 	EditInstructions string `json:"editInstructions"`
 	// UltraWrite runs the full-analysis write instead of the lightweight edit.
 	// Only applies when EditInstructions is provided.
@@ -144,62 +119,63 @@ func (e *Endpoint) RegenerateCoverLetter(c *gin.Context) {
 		return
 	}
 
-	id, err := uuid.Parse(input.JobApplicationId)
+	id, err := uuid.Parse(input.Id)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cover letter ID"})
 		return
 	}
 
-	jobApplication, err := e.getCoverLetterApplication(id, userId)
+	coverLetter, err := e.getStandaloneCoverLetter(id, userId)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Cover letter not found"})
 			return
 		}
-		e.logger.ErrorContext(ctx, "failed to load cover letter application", "error", err)
+		e.logger.ErrorContext(ctx, "failed to load cover letter", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load cover letter"})
 		return
 	}
 
-	workflowId := newCoverLetterWorkflowID()
-	if err := e.db.Model(&jobApplication).Updates(map[string]any{
-		"status":      model.JobApplicationStatusProcessing,
-		"workflow_id": &workflowId,
+	workflowId := NewCoverLetterWorkflowID()
+	if err := e.db.Model(&coverLetter).Updates(map[string]any{
+		"status":         model.CoverLetterStatusProcessing,
+		"workflow_id":    &workflowId,
+		"body":           gorm.Expr("NULL"),
+		"failure_reason": gorm.Expr("NULL"),
 	}).Error; err != nil {
-		e.logger.ErrorContext(ctx, "failed to update cover letter application on regenerate", "error", err)
+		e.logger.ErrorContext(ctx, "failed to update cover letter on regenerate", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to regenerate cover letter"})
 		return
 	}
 
-	var edit *editInstructions
+	var edit *EditInstructions
 	if input.EditInstructions != "" {
-		edit = &editInstructions{Instructions: input.EditInstructions}
+		edit = &EditInstructions{Instructions: input.EditInstructions}
 	}
 
-	// Regeneration takes minutes; run it in the background and return immediately.
-	// Completion is signalled to the frontend via a realtime event.
-	jobApplication.Status = model.JobApplicationStatusProcessing
-	e.generateCoverLetterAsync(userId, jobApplication, workflowId, edit, input.UltraWrite)
+	coverLetter.Status = model.CoverLetterStatusProcessing
+	coverLetter.WorkflowID = &workflowId
+	e.GenerateCoverLetterAsync(userId, coverLetter, workflowId, edit, input.UltraWrite)
 
 	c.JSON(http.StatusAccepted, CreateCoverLetterResponse{
-		JobApplicationId: jobApplication.IdExternal.String(),
-		Status:           model.JobApplicationStatusProcessing,
+		Id:     coverLetter.IdExternal.String(),
+		Status: model.CoverLetterStatusProcessing,
 	})
 }
 
 type GetCoverLetterResponse struct {
-	JobApplicationId string                     `json:"jobApplicationId"`
-	CoverLetter      string                     `json:"coverLetter"`
-	CompanyName      string                     `json:"companyName"`
-	JobTitle         string                     `json:"jobTitle"`
-	JobDescription   string                     `json:"jobDescription"`
-	Url              string                     `json:"url"`
-	ResumeId         string                     `json:"resumeId"`
-	Status           model.JobApplicationStatus `json:"status"`
-	CreatedAt        time.Time                  `json:"createdAt"`
+	Id             string                  `json:"id"`
+	CoverLetter    string                  `json:"coverLetter"`
+	CompanyName    string                  `json:"companyName"`
+	JobTitle       string                  `json:"jobTitle"`
+	JobDescription string                  `json:"jobDescription"`
+	Url            string                  `json:"url"`
+	ResumeId       string                  `json:"resumeId"`
+	Status         model.CoverLetterStatus `json:"status"`
+	CreatedAt      time.Time               `json:"createdAt"`
 }
 
-// GET /coverletter/job-application/:jobApplicationId
+// GET /coverletter/:id
 func (e *Endpoint) GetCoverLetter(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -210,18 +186,17 @@ func (e *Endpoint) GetCoverLetter(c *gin.Context) {
 		return
 	}
 
-	id, err := uuid.Parse(c.Param("jobApplicationId"))
+	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cover letter ID"})
 		return
 	}
 
-	var jobApplication model.JobApplication
+	var coverLetter model.CoverLetter
 	if err := e.db.
-		Where("id_external = ? AND id_user = ? AND cover_letter_only = true AND deleted_at IS NULL", id, userId).
-		Preload("JobApplicationData").
+		Where("id_external = ? AND id_user = ? AND id_job_application IS NULL AND deleted_at IS NULL", id, userId).
 		Preload("Resume").
-		First(&jobApplication).Error; err != nil {
+		First(&coverLetter).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Cover letter not found"})
 			return
@@ -231,7 +206,7 @@ func (e *Endpoint) GetCoverLetter(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, buildCoverLetterResponse(&jobApplication))
+	c.JSON(http.StatusOK, buildCoverLetterResponse(&coverLetter))
 }
 
 type FetchCoverLettersRequest struct {
@@ -242,14 +217,14 @@ type FetchCoverLettersRequest struct {
 
 // CoverLetterListItem is GetCoverLetterResponse without the cover letter body.
 type CoverLetterListItem struct {
-	JobApplicationId string                     `json:"jobApplicationId"`
-	CompanyName      string                     `json:"companyName"`
-	JobTitle         string                     `json:"jobTitle"`
-	JobDescription   string                     `json:"jobDescription"`
-	Url              string                     `json:"url"`
-	ResumeId         string                     `json:"resumeId"`
-	Status           model.JobApplicationStatus `json:"status"`
-	CreatedAt        time.Time                  `json:"createdAt"`
+	Id             string                  `json:"id"`
+	CompanyName    string                  `json:"companyName"`
+	JobTitle       string                  `json:"jobTitle"`
+	JobDescription string                  `json:"jobDescription"`
+	Url            string                  `json:"url"`
+	ResumeId       string                  `json:"resumeId"`
+	Status         model.CoverLetterStatus `json:"status"`
+	CreatedAt      time.Time               `json:"createdAt"`
 }
 
 type FetchCoverLettersResponse struct {
@@ -286,9 +261,8 @@ func (e *Endpoint) GetCoverLetters(c *gin.Context) {
 		request.Limit = 100
 	}
 
-	baseQuery := e.db.Model(&model.JobApplication{}).
-		Where("id_user = ? AND cover_letter_only = true AND deleted_at IS NULL", userId).
-		Preload("JobApplicationData").
+	baseQuery := e.db.Model(&model.CoverLetter{}).
+		Where("id_user = ? AND id_job_application IS NULL AND deleted_at IS NULL", userId).
 		Preload("Resume")
 	if request.Search != "" {
 		like := "%" + request.Search + "%"
@@ -302,20 +276,20 @@ func (e *Endpoint) GetCoverLetters(c *gin.Context) {
 		return
 	}
 
-	var jobApplications []model.JobApplication
+	var coverLetters []model.CoverLetter
 	if err := baseQuery.
 		Order("created_at DESC").
 		Limit(request.Limit).
 		Offset((request.Page - 1) * request.Limit).
-		Find(&jobApplications).Error; err != nil {
+		Find(&coverLetters).Error; err != nil {
 		e.logger.ErrorContext(ctx, "failed to fetch cover letters", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch cover letters"})
 		return
 	}
 
-	items := make([]CoverLetterListItem, 0, len(jobApplications))
-	for i := range jobApplications {
-		items = append(items, buildCoverLetterListItem(&jobApplications[i]))
+	items := make([]CoverLetterListItem, 0, len(coverLetters))
+	for i := range coverLetters {
+		items = append(items, buildCoverLetterListItem(&coverLetters[i]))
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": FetchCoverLettersResponse{
@@ -327,10 +301,6 @@ func (e *Endpoint) GetCoverLetters(c *gin.Context) {
 }
 
 // ── helpers ──
-
-func newCoverLetterWorkflowID() string {
-	return fmt.Sprintf("cover-letter-%s", uuid.New().String())
-}
 
 // resolveResume returns the resume identified by externalId (scoped to the user)
 // when provided, otherwise the user's active resume.
@@ -344,173 +314,59 @@ func (e *Endpoint) resolveResume(userId uint, externalId *string) (model.Resume,
 	return resume, err
 }
 
-func (e *Endpoint) createCoverLetterApplication(userId, resumeId uint, input CreateCoverLetterInput) (model.JobApplication, error) {
-	workflowId := newCoverLetterWorkflowID()
-	jobApplication := model.JobApplication{
-		UserId:          userId,
-		ResumeId:        resumeId,
-		JobTitle:        input.JobTitle,
-		CompanyName:     input.CompanyName,
-		JobDescription:  input.JobDescription,
-		Url:             input.Url,
-		Status:          model.JobApplicationStatusProcessing,
-		CoverLetterOnly: true,
-		WorkflowID:      &workflowId,
+func (e *Endpoint) createStandaloneCoverLetter(userId, resumeId uint, input CreateCoverLetterInput) (model.CoverLetter, error) {
+	workflowId := NewCoverLetterWorkflowID()
+	coverLetter := model.CoverLetter{
+		UserId:         userId,
+		ResumeId:       resumeId,
+		JobTitle:       input.JobTitle,
+		CompanyName:    input.CompanyName,
+		JobDescription: input.JobDescription,
+		Url:            input.Url,
+		Status:         model.CoverLetterStatusProcessing,
+		WorkflowID:     &workflowId,
 	}
-	if err := e.db.Create(&jobApplication).Error; err != nil {
-		return model.JobApplication{}, err
-	}
-	return jobApplication, nil
-}
-
-func (e *Endpoint) getCoverLetterApplication(id uuid.UUID, userId uint) (model.JobApplication, error) {
-	var jobApplication model.JobApplication
-	err := e.db.
-		Where("id_external = ? AND id_user = ? AND cover_letter_only = true AND deleted_at IS NULL", id, userId).
-		First(&jobApplication).Error
-	return jobApplication, err
-}
-
-func (e *Endpoint) runCoverLetterWorkflow(ctx context.Context, workflowId string, userId, idJobApplication uint, edit *editInstructions, ultraWrite bool) (string, error) {
-	options := client.StartWorkflowOptions{
-		ID:                       workflowId,
-		TaskQueue:                string(e.taskQueueName),
-		WorkflowExecutionTimeout: coverLetterTimeout,
-		WorkflowTaskTimeout:      1 * time.Minute,
-	}
-
-	workflowInput := coverLetterWorkflowInput{
-		IdJobApplication: idJobApplication,
-		IdUser:           userId,
-		EditInstructions: edit,
-		UltraWrite:       ultraWrite,
-	}
-
-	run, err := e.temporalClient.ExecuteWorkflow(ctx, options, "CoverLetterWorkflow", workflowInput)
-	if err != nil {
-		return "", fmt.Errorf("start cover letter workflow: %w", err)
-	}
-
-	var result map[string]any
-	if err := run.Get(ctx, &result); err != nil {
-		return "", fmt.Errorf("cover letter workflow execution: %w", err)
-	}
-
-	coverLetter, _ := result["cover_letter"].(string)
-	if coverLetter == "" {
-		return "", errors.New("cover letter workflow returned empty result")
+	if err := e.db.Create(&coverLetter).Error; err != nil {
+		return model.CoverLetter{}, err
 	}
 	return coverLetter, nil
 }
 
-// generateCoverLetterAsync runs the cover letter workflow in the background so the
-// request handler can return immediately. On completion it persists the result and
-// publishes a realtime event (ready/failed) to the user. jobApplication is taken by
-// value so the caller can return safely once the goroutine is spawned.
-func (e *Endpoint) generateCoverLetterAsync(userId uint, jobApplication model.JobApplication, workflowId string, edit *editInstructions, ultraWrite bool) {
-	go func() {
-		// The request context is cancelled once the handler returns, so use a fresh one.
-		ctx := context.Background()
-
-		coverLetter, err := e.runCoverLetterWorkflow(ctx, workflowId, userId, jobApplication.IdJobApplication, edit, ultraWrite)
-		if err != nil {
-			e.logger.Error("cover letter workflow failed", "error", err)
-			e.failCoverLetter(ctx, &jobApplication, userId, err)
-			return
-		}
-
-		if err := e.persistCoverLetterData(&jobApplication, coverLetter); err != nil {
-			e.logger.Error("failed to persist cover letter data", "error", err)
-			e.failCoverLetter(ctx, &jobApplication, userId, err)
-			return
-		}
-
-		e.publishCoverLetterEvent(ctx, userId, jobApplication.IdExternal.String(), redispubsub.EventCoverLetterReady, model.JobApplicationStatusApplied)
-	}()
+func (e *Endpoint) getStandaloneCoverLetter(id uuid.UUID, userId uint) (model.CoverLetter, error) {
+	var coverLetter model.CoverLetter
+	err := e.db.
+		Where("id_external = ? AND id_user = ? AND id_job_application IS NULL AND deleted_at IS NULL", id, userId).
+		First(&coverLetter).Error
+	return coverLetter, err
 }
 
-// failCoverLetter marks the application failed and notifies the user.
-func (e *Endpoint) failCoverLetter(ctx context.Context, jobApplication *model.JobApplication, userId uint, cause error) {
-	e.markApplicationFailed(jobApplication, cause)
-	e.publishCoverLetterEvent(ctx, userId, jobApplication.IdExternal.String(), redispubsub.EventCoverLetterFailed, model.JobApplicationStatusFailed)
-}
-
-// publishCoverLetterEvent pushes a cover letter status change to the user's realtime channel.
-func (e *Endpoint) publishCoverLetterEvent(ctx context.Context, userId uint, jobApplicationId string, event redispubsub.EventType, status model.JobApplicationStatus) {
-	data := map[string]any{"jobApplicationId": jobApplicationId, "status": status}
-	if err := e.redisPubSub.PublishToUser(ctx, fmt.Sprintf("%d", userId), event, data); err != nil {
-		e.logger.Error("failed to publish cover letter event", "error", err)
-	}
-}
-
-// persistCoverLetterData upserts the JobApplicationData row with the generated cover letter
-// and marks the application as applied.
-func (e *Endpoint) persistCoverLetterData(jobApplication *model.JobApplication, coverLetter string) error {
-	return e.db.Transaction(func(tx *gorm.DB) error {
-		var data model.JobApplicationData
-		err := tx.Where("id_job_application = ?", jobApplication.IdJobApplication).First(&data).Error
-		switch {
-		case err == nil:
-			if err := tx.Model(&data).Update("cover_letter", &coverLetter).Error; err != nil {
-				return err
-			}
-		case errors.Is(err, gorm.ErrRecordNotFound):
-			data = model.JobApplicationData{
-				UserId:           jobApplication.UserId,
-				JobApplicationId: jobApplication.IdJobApplication,
-				CoverLetter:      &coverLetter,
-				Questions:        model.JobApplicationQuestionsList{},
-			}
-			if err := tx.Create(&data).Error; err != nil {
-				return err
-			}
-		default:
-			return err
-		}
-
-		return tx.Model(jobApplication).Update("status", model.JobApplicationStatusApplied).Error
-	})
-}
-
-func (e *Endpoint) markApplicationFailed(jobApplication *model.JobApplication, cause error) {
-	reason := cause.Error()
-	if err := e.db.Model(jobApplication).Updates(map[string]any{
-		"status":         model.JobApplicationStatusFailed,
-		"failure_reason": &reason,
-	}).Error; err != nil {
-		e.logger.Error("failed to mark cover letter application as failed", "error", err)
-	}
-}
-
-func buildCoverLetterResponse(jobApplication *model.JobApplication) GetCoverLetterResponse {
+func buildCoverLetterResponse(coverLetter *model.CoverLetter) GetCoverLetterResponse {
 	res := GetCoverLetterResponse{
-		JobApplicationId: jobApplication.IdExternal.String(),
-		CompanyName:      jobApplication.CompanyName,
-		JobTitle:         jobApplication.JobTitle,
-		JobDescription:   jobApplication.JobDescription,
-		Url:              jobApplication.Url,
-		Status:           jobApplication.Status,
-		CreatedAt:        jobApplication.CreatedAt,
+		Id:             coverLetter.IdExternal.String(),
+		CompanyName:    coverLetter.CompanyName,
+		JobTitle:       coverLetter.JobTitle,
+		JobDescription: coverLetter.JobDescription,
+		Url:            coverLetter.Url,
+		Status:         coverLetter.Status,
+		CreatedAt:      coverLetter.CreatedAt,
 	}
-	if data := jobApplication.JobApplicationData; data != nil {
-		if data.CoverLetter != nil {
-			res.CoverLetter = *data.CoverLetter
-		}
+	if coverLetter.Body != nil {
+		res.CoverLetter = *coverLetter.Body
 	}
-	res.ResumeId = jobApplication.Resume.IdExternal.String()
+	res.ResumeId = coverLetter.Resume.IdExternal.String()
 	return res
 }
 
-func buildCoverLetterListItem(jobApplication *model.JobApplication) CoverLetterListItem {
+func buildCoverLetterListItem(coverLetter *model.CoverLetter) CoverLetterListItem {
 	item := CoverLetterListItem{
-		JobApplicationId: jobApplication.IdExternal.String(),
-		CompanyName:      jobApplication.CompanyName,
-		JobTitle:         jobApplication.JobTitle,
-		JobDescription:   jobApplication.JobDescription,
-		Url:              jobApplication.Url,
-		Status:           jobApplication.Status,
-		CreatedAt:        jobApplication.CreatedAt,
+		Id:             coverLetter.IdExternal.String(),
+		CompanyName:    coverLetter.CompanyName,
+		JobTitle:       coverLetter.JobTitle,
+		JobDescription: coverLetter.JobDescription,
+		Url:            coverLetter.Url,
+		Status:         coverLetter.Status,
+		CreatedAt:      coverLetter.CreatedAt,
 	}
-	item.ResumeId = jobApplication.Resume.IdExternal.String()
+	item.ResumeId = coverLetter.Resume.IdExternal.String()
 	return item
 }

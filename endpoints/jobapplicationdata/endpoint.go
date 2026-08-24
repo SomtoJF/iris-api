@@ -28,8 +28,8 @@ type ResumeDTO struct {
 
 type JobApplicationDataResponse struct {
 	Questions   model.JobApplicationQuestionsList `json:"questions"`
-	CoverLetter *string                          `json:"cover_letter"`
-	Resume      ResumeDTO                        `json:"resume"`
+	CoverLetter *string                           `json:"cover_letter"`
+	Resume      ResumeDTO                         `json:"resume"`
 }
 
 func (e *Endpoint) GetJobApplicationData(c *gin.Context) {
@@ -47,7 +47,10 @@ func (e *Endpoint) GetJobApplicationData(c *gin.Context) {
 	}
 
 	var jobApp model.JobApplication
-	if err := e.db.Where("id_external = ? AND id_user = ?", jobAppId, userId).Preload("Resume").First(&jobApp).Error; err != nil {
+	if err := e.db.Where("id_external = ? AND id_user = ?", jobAppId, userId).
+		Preload("Resume").
+		Preload("CoverLetter").
+		First(&jobApp).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
 			return
@@ -69,9 +72,14 @@ func (e *Endpoint) GetJobApplicationData(c *gin.Context) {
 		return
 	}
 
+	var coverLetter *string
+	if jobApp.CoverLetter != nil && jobApp.CoverLetter.Body != nil {
+		coverLetter = jobApp.CoverLetter.Body
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": JobApplicationDataResponse{
 		Questions:   data.Questions,
-		CoverLetter: data.CoverLetter,
+		CoverLetter: coverLetter,
 		Resume: ResumeDTO{
 			Id:          jobApp.Resume.IdExternal.String(),
 			DisplayName: jobApp.Resume.DisplayName,
