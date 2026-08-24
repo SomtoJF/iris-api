@@ -11,10 +11,10 @@ import (
 	"github.com/SomtoJF/iris-api/endpoints/auth"
 	"github.com/SomtoJF/iris-api/endpoints/costtracking"
 	"github.com/SomtoJF/iris-api/endpoints/coverletter"
-	"github.com/SomtoJF/iris-api/endpoints/extension"
 	"github.com/SomtoJF/iris-api/endpoints/health"
 	"github.com/SomtoJF/iris-api/endpoints/issue"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplication"
+	extensionjobapplication "github.com/SomtoJF/iris-api/endpoints/jobapplication/extension"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplicationdata"
 	"github.com/SomtoJF/iris-api/endpoints/jobapplicationprofile"
 	"github.com/SomtoJF/iris-api/endpoints/jobsearch"
@@ -111,7 +111,7 @@ func main() {
 	issueEndpoint := issue.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 	jobApplicationDataEndpoint := jobapplicationdata.NewEndpoint(db, logger)
 	coverLetterEndpoint := coverletter.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName, redisPubSub)
-	extensionEndpoint := extension.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
+	extensionJobApplicationEndpoint := extensionjobapplication.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
 
 	authMiddleware := verifyauth.NewMiddleware(db)
 
@@ -145,10 +145,10 @@ func main() {
 		protected.GET("/jobs/search/history", jobSearchEndpoint.GetJobSearchHistory)
 		protected.POST("/jobs/search", jobSearchEndpoint.TriggerJobSearch)
 
-		protected.POST("/extension/initiate", extensionEndpoint.InitiateApplication)
-		protected.POST("/extension/application/:id/autofill", extensionEndpoint.AutofillApplication)
-		protected.POST("/extension/application/:id/sync-data", extensionEndpoint.SyncApplicationData)
-		protected.POST("/extension/application/:id/mark-as-applied", extensionEndpoint.MarkAsApplied) // extension mark-as-applied
+		protected.POST("/extension/initiate", extensionJobApplicationEndpoint.InitiateApplication)
+		protected.POST("/extension/application/:id/autofill", extensionJobApplicationEndpoint.AutofillApplication)
+		protected.POST("/extension/application/:id/sync-data", extensionJobApplicationEndpoint.SyncApplicationData)
+		protected.POST("/extension/application/:id/mark-as-applied", extensionJobApplicationEndpoint.MarkAsApplied) // extension mark-as-applied
 
 		protected.POST("/coverletter", coverLetterEndpoint.CreateCoverLetter)
 		protected.POST("/coverletter/regenerate", coverLetterEndpoint.RegenerateCoverLetter)
