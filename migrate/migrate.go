@@ -34,22 +34,22 @@ func main() {
 	// 	log.Fatal(err)
 	// }
 
-	// log.Println("Starting migration on table job application")
-	// if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
-	// 	log.Fatal(err)
-	// }
-	// log.Println("Migrated table job application")
+	log.Println("Starting migration on table job application")
+	if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Migrated table job application")
 
 	// log.Println("Starting migration on table job application profile")
 	// if err := db.AutoMigrate(&model.JobApplicationProfile{}); err != nil {
 	// 	log.Fatal(err)
 	// }
 
-	log.Println("Starting migration on table resume")
-	if err := db.AutoMigrate(&model.Resume{}); err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Migrated table resume")
+	// log.Println("Starting migration on table resume")
+	// if err := db.AutoMigrate(&model.Resume{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Migrated table resume")
 
 	// ensureOneActiveResumePerUser()
 	// log.Println("Starting migration on table user action")

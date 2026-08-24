@@ -248,6 +248,13 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 		baseQuery = baseQuery.Where("status != ?", request.StatusNot)
 	}
 
+	var total int64
+	if err := baseQuery.Count(&total).Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to count job applications", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch total job applications"})
+		return
+	}
+
 	var jobApplications []model.JobApplication
 	if err := baseQuery.Order("created_at DESC").Limit(request.Limit).Offset((request.Page - 1) * request.Limit).Find(&jobApplications).Error; err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to fetch job applications", "error", err)
@@ -255,12 +262,6 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 		return
 	}
 
-	var total int64
-	if err := baseQuery.Count(&total).Error; err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to count job applications", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch total job applications"})
-		return
-	}
 	applications := make([]JobApplication, 0, len(jobApplications))
 	for _, jobApplication := range jobApplications {
 		applications = append(applications, JobApplication{
@@ -334,7 +335,18 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 	}
 
 	if jobApplication.WorkflowID == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No workflow associated with this application"})
+		if err := e.cancelApplication(&jobApplication, req.Reason); err != nil {
+			e.logger.ErrorContext(c.Request.Context(), "failed to cancel application", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel application"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"error": "Application cancelled"})
+		return
+	}
+
+	if err := e.cancelApplication(&jobApplication, req.Reason); err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to cancel application", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel application"})
 		return
 	}
 
@@ -342,21 +354,34 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 	if req.Reason != nil {
 		reason = *req.Reason
 	}
+	workflowID := *jobApplication.WorkflowID
+	go func() {
+		err := e.temporalClient.SignalWorkflow(
+			context.Background(),
+			workflowID,
+			"",
+			"CANCEL_APPLICATION",
+			CancelSignalPayload{Reason: reason},
+		)
+		if err != nil {
+			e.logger.Error("failed to signal workflow for cancellation", "error", err, "workflowID", workflowID)
+		}
+	}()
 
-	err = e.temporalClient.SignalWorkflow(
-		context.Background(),
-		*jobApplication.WorkflowID,
-		"",
-		"CANCEL_APPLICATION",
-		CancelSignalPayload{Reason: reason},
-	)
-	if err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to signal workflow for cancellation", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel application"})
-		return
+	c.JSON(http.StatusAccepted, gin.H{"message": "Application cancellation initiated"})
+}
+
+func (e *Endpoint) cancelApplication(jobApplication *model.JobApplication, reason *string) error {
+	if err := e.db.Model(jobApplication).
+		Where("status = ?", model.JobApplicationStatusProcessing).
+		Updates(map[string]any{
+			"status":              model.JobApplicationStatusCancelled,
+			"cancellation_reason": reason,
+		}).Error; err != nil {
+		return err
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Application cancellation initiated"})
+	return nil
 }
 
 func (e *Endpoint) DeleteApplication(c *gin.Context) {
