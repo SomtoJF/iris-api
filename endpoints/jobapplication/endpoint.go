@@ -532,16 +532,17 @@ type ResumeSummary struct {
 }
 
 type JobApplicationComprehensiveResponse struct {
-	Id             string                          `json:"id"`
-	AppliedAt      *time.Time                      `json:"appliedAt,omitempty"`
-	Url            string                          `json:"url"`
-	JobTitle       string                          `json:"jobTitle"`
-	CompanyName    string                          `json:"companyName"`
-	Status         string                          `json:"status"`
-	Questions      []model.JobApplicationQuestions `json:"questions"`
-	JobDescription string                          `json:"jobDescription"`
-	CoverLetter    *string                         `json:"coverLetter"`
-	Resume         ResumeSummary                   `json:"resume"`
+	Id                string                          `json:"id"`
+	AppliedAt         *time.Time                      `json:"appliedAt,omitempty"`
+	Url               string                          `json:"url"`
+	JobTitle          string                          `json:"jobTitle"`
+	CompanyName       string                          `json:"companyName"`
+	Status            string                          `json:"status"`
+	Questions         []model.JobApplicationQuestions `json:"questions"`
+	JobDescription    string                          `json:"jobDescription"`
+	CoverLetter       *string                         `json:"coverLetter"`
+	CoverLetterStatus model.CoverLetterStatus         `json:"coverLetterStatus,omitempty"`
+	Resume            ResumeSummary                   `json:"resume"`
 }
 
 // get /jobs/:id/comprehensive
@@ -567,23 +568,28 @@ func (e *Endpoint) FetchJobApplicationComprehensive(c *gin.Context) {
 
 	var questions []model.JobApplicationQuestions
 	var coverLetter *string
+	var coverLetterStatus model.CoverLetterStatus
 	if jobApplication.JobApplicationData != nil {
 		questions = jobApplication.JobApplicationData.Questions
 	}
-	if jobApplication.CoverLetter != nil && jobApplication.CoverLetter.Body != nil {
-		coverLetter = jobApplication.CoverLetter.Body
+	if jobApplication.CoverLetter != nil {
+		coverLetterStatus = jobApplication.CoverLetter.Status
+		if jobApplication.CoverLetter.Body != nil {
+			coverLetter = jobApplication.CoverLetter.Body
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": JobApplicationComprehensiveResponse{
-		Id:             jobApplication.IdExternal.String(),
-		Url:            jobApplication.Url,
-		JobTitle:       jobApplication.JobTitle,
-		CompanyName:    jobApplication.CompanyName,
-		Status:         string(jobApplication.Status),
-		Questions:      questions,
-		JobDescription: jobApplication.JobDescription,
-		CoverLetter:    coverLetter,
-		AppliedAt:      jobApplication.AppliedAt,
+		Id:                jobApplication.IdExternal.String(),
+		Url:               jobApplication.Url,
+		JobTitle:          jobApplication.JobTitle,
+		CompanyName:       jobApplication.CompanyName,
+		Status:            string(jobApplication.Status),
+		Questions:         questions,
+		JobDescription:    jobApplication.JobDescription,
+		CoverLetter:       coverLetter,
+		CoverLetterStatus: coverLetterStatus,
+		AppliedAt:         jobApplication.AppliedAt,
 		Resume: ResumeSummary{
 			Id:          jobApplication.Resume.IdExternal.String(),
 			DisplayName: jobApplication.Resume.DisplayName,
