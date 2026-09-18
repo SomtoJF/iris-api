@@ -23,17 +23,30 @@ const (
 	JobApplicationStatusHalted JobApplicationStatus = "halted"
 )
 
+type ResponseStatus string
+
+const (
+	ResponseStatusNone          ResponseStatus = "none"
+	ResponseStatusRejected      ResponseStatus = "rejected"
+	ResponseStatusInterviewing  ResponseStatus = "interviewing"
+	ResponseStatusGhosted       ResponseStatus = "ghosted"
+	ResponseStatusOffer         ResponseStatus = "offer"
+	ResponseStatusOfferAccepted ResponseStatus = "offer_accepted"
+)
+
 type JobApplication struct {
-	IdJobApplication   uint                 `gorm:"primaryKey;autoIncrement;column:id_job_application" json:"_"`
-	IdExternal         uuid.UUID            `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
-	UserId             uint                 `gorm:"column:id_user;not null;index"`
-	User               User                 `gorm:"foreignKey:UserId;references:IdUser"`
-	ResumeId           uint                 `gorm:"column:id_resume;not null"`
-	Resume             Resume               `gorm:"foreignKey:ResumeId;references:IdResume"`
-	JobApplicationData *JobApplicationData  `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
-	CoverLetter        *CoverLetter         `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
-	Status             JobApplicationStatus `gorm:"type:varchar(50);not null;index"`
-	WorkflowID         *string              `gorm:"type:text;default:NULL"`
+	IdJobApplication   uint                `gorm:"primaryKey;autoIncrement;column:id_job_application" json:"_"`
+	IdExternal         uuid.UUID           `gorm:"unique;type:uuid;default:gen_random_uuid()" json:"id"`
+	UserId             uint                `gorm:"column:id_user;not null;index"`
+	User               User                `gorm:"foreignKey:UserId;references:IdUser"`
+	ResumeId           uint                `gorm:"column:id_resume;not null"`
+	Resume             Resume              `gorm:"foreignKey:ResumeId;references:IdResume"`
+	JobApplicationData *JobApplicationData `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
+	CoverLetter        *CoverLetter        `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
+	// application status
+	Status         JobApplicationStatus `gorm:"type:varchar(50);not null;index"`
+	ResponseStatus ResponseStatus       `gorm:"type:varchar(50);not null;index;default:none"`
+	WorkflowID     *string              `gorm:"type:text;default:NULL"`
 
 	FailureReason      *string    `gorm:"type:text;default:NULL"`
 	CancellationReason *string    `gorm:"type:text;default:NULL"`

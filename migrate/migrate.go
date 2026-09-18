@@ -36,17 +36,17 @@ func main() {
 	// 	log.Fatal(err)
 	// }
 
-	// log.Println("Starting migration on table job application")
-	// if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
-	// 	log.Fatal(err)
-	// }
-	// log.Println("Migrated table job application")
-
-	log.Println("Starting migration on table cover letter")
-	if err := db.AutoMigrate(&model.CoverLetter{}); err != nil {
+	log.Println("Starting migration on table job application")
+	if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
 		log.Fatal(err)
 	}
-	log.Println("Migrated table cover letter")
+	log.Println("Migrated table job application")
+
+	// log.Println("Starting migration on table cover letter")
+	// if err := db.AutoMigrate(&model.CoverLetter{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Migrated table cover letter")
 
 	// migrateCoverLettersFromJobApplications()
 

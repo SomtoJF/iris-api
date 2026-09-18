@@ -191,11 +191,13 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 }
 
 type FetchAllJobApplicationsRequest struct {
-	Page      int    `form:"page" binding:"required"`
-	Limit     int    `form:"limit" binding:"required"`
-	Search    string `form:"search"`
-	Status    string `form:"status" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
-	StatusNot string `form:"status_not" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
+	Page              int    `form:"page" binding:"required"`
+	Limit             int    `form:"limit" binding:"required"`
+	Search            string `form:"search"`
+	Status            string `form:"status" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
+	StatusNot         string `form:"status_not" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
+	ResponseStatus    string `form:"response_status" binding:"omitempty,oneof=none rejected interviewing ghosted"`
+	ResponseStatusNot string `form:"response_status_not" binding:"omitempty,oneof=none rejected interviewing ghosted"`
 }
 
 type JobApplication struct {
@@ -204,6 +206,7 @@ type JobApplication struct {
 	JobTitle           string                     `json:"jobTitle"`
 	CompanyName        string                     `json:"companyName"`
 	Status             model.JobApplicationStatus `json:"status"`
+	ResponseStatus     model.ResponseStatus       `json:"responseStatus"`
 	HasApplicationData bool                       `json:"hasApplicationData"`
 	AppliedAt          *time.Time                 `json:"appliedAt,omitempty"`
 	FailureReason      *string                    `json:"failureReason,omitempty"`
@@ -247,6 +250,12 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	if request.StatusNot != "" {
 		baseQuery = baseQuery.Where("status != ?", request.StatusNot)
 	}
+	if request.ResponseStatus != "" {
+		baseQuery = baseQuery.Where("response_status = ?", request.ResponseStatus)
+	}
+	if request.ResponseStatusNot != "" {
+		baseQuery = baseQuery.Where("response_status != ?", request.ResponseStatusNot)
+	}
 
 	var total int64
 	if err := baseQuery.Count(&total).Error; err != nil {
@@ -270,6 +279,7 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 			JobTitle:           jobApplication.JobTitle,
 			CompanyName:        jobApplication.CompanyName,
 			Status:             jobApplication.Status,
+			ResponseStatus:     jobApplication.ResponseStatus,
 			HasApplicationData: jobApplication.JobApplicationData != nil,
 			FailureReason:      jobApplication.FailureReason,
 			CancellationReason: jobApplication.CancellationReason,
@@ -427,7 +437,8 @@ func (e *Endpoint) DeleteApplication(c *gin.Context) {
 }
 
 type PatchJobApplicationRequest struct {
-	ResumeId *string `json:"resumeId"`
+	ResumeId       *string               `json:"resumeId"`
+	ResponseStatus *model.ResponseStatus `json:"responseStatus" binding:"omitempty,oneof=none rejected interviewing ghosted"`
 }
 
 func (e *Endpoint) PatchJobApplication(c *gin.Context) {
@@ -451,7 +462,7 @@ func (e *Endpoint) PatchJobApplication(c *gin.Context) {
 		return
 	}
 
-	if req.ResumeId == nil {
+	if req.ResumeId == nil && req.ResponseStatus == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "No updatable fields provided"})
 		return
 	}
@@ -467,18 +478,25 @@ func (e *Endpoint) PatchJobApplication(c *gin.Context) {
 		return
 	}
 
-	resume, err := e.resolveResume(userId, req.ResumeId)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No resume found"})
+	updates := make(map[string]any)
+	if req.ResumeId != nil {
+		resume, err := e.resolveResume(userId, req.ResumeId)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "No resume found"})
+				return
+			}
+			e.logger.ErrorContext(c.Request.Context(), "failed to resolve resume for patch", "error", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve resume"})
 			return
 		}
-		e.logger.ErrorContext(c.Request.Context(), "failed to resolve resume for patch", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve resume"})
-		return
+		updates["id_resume"] = resume.IdResume
+	}
+	if req.ResponseStatus != nil {
+		updates["response_status"] = *req.ResponseStatus
 	}
 
-	if err := e.db.Model(&jobApplication).Update("id_resume", resume.IdResume).Error; err != nil {
+	if err := e.db.Model(&jobApplication).Updates(updates).Error; err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to update job application resume", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
 		return
