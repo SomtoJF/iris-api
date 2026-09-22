@@ -36,9 +36,10 @@ type ApplyForJobRequest struct {
 }
 
 type InitiateApplicationWorkflowInput struct {
-	Url              string `json:"url"`
-	IdUser           uint   `json:"id_user"`
-	IdJobApplication uint   `json:"id_job_application"`
+	Url                   string `json:"url"`
+	IdUser                uint   `json:"id_user"`
+	IdJobApplication      uint   `json:"id_job_application"`
+	ApplicationExternalId string `json:"application_external_id"`
 }
 
 type InitiateApplicationWorkflowResponse struct {
@@ -112,9 +113,10 @@ func (e *Endpoint) InitiateApplication(c *gin.Context) {
 		ID:        workflowID,
 		TaskQueue: string(e.taskQueueName),
 	}, "InitiateApplicationWorkflow", InitiateApplicationWorkflowInput{
-		Url:              request.Url,
-		IdUser:           userId,
-		IdJobApplication: jobApplication.IdJobApplication,
+		Url:                   request.Url,
+		IdUser:                userId,
+		IdJobApplication:      jobApplication.IdJobApplication,
+		ApplicationExternalId: jobApplication.IdExternal.String(),
 	})
 	if err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to initiate application workflow", "error", err)
@@ -128,17 +130,6 @@ func (e *Endpoint) InitiateApplication(c *gin.Context) {
 		e.logger.ErrorContext(c.Request.Context(), "failed to get workflow result", "error", err)
 		e.softDeleteApplication(c, &jobApplication)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get workflow result"})
-		return
-	}
-
-	if err := e.db.Model(&jobApplication).Updates(map[string]any{
-		"job_title":       workflowResponse.JobTitle,
-		"company_name":    workflowResponse.CompanyName,
-		"job_description": workflowResponse.JobDescription,
-	}).Error; err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to update job application after initiate", "error", err)
-		e.softDeleteApplication(c, &jobApplication)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
 		return
 	}
 
