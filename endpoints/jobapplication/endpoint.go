@@ -175,18 +175,36 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 		return
 	}
 
+	if jobApplication.Status != model.JobApplicationStatusFailed &&
+		jobApplication.Status != model.JobApplicationStatusCancelled &&
+		jobApplication.Status != model.JobApplicationStatusHalted {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only failed, cancelled, or halted applications can be retried"})
+		return
+	}
+
 	workflowId := fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String())
 
-	if err := e.db.Model(&jobApplication).Updates(map[string]any{
-		"status":              model.JobApplicationStatusProcessing,
-		"workflow_id":         &workflowId,
-		"created_at":          time.Now(),
-		"failure_reason":      nil,
-		"halt_reason":         nil,
-		"cancellation_reason": nil,
-	}).Error; err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to update job application on retry", "error", err)
+	result := e.db.Model(&jobApplication).
+		Where("status IN ?", []model.JobApplicationStatus{
+			model.JobApplicationStatusFailed,
+			model.JobApplicationStatusCancelled,
+			model.JobApplicationStatusHalted,
+		}).
+		Updates(map[string]any{
+			"status":              model.JobApplicationStatusProcessing,
+			"workflow_id":         &workflowId,
+			"created_at":          time.Now(),
+			"failure_reason":      nil,
+			"halt_reason":         nil,
+			"cancellation_reason": nil,
+		})
+	if result.Error != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to update job application on retry", "error", result.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusConflict, gin.H{"error": "Application state changed; please try again"})
 		return
 	}
 
@@ -364,14 +382,19 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 		return
 	}
 
-	if jobApplication.Status != model.JobApplicationStatusProcessing {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Application is not currently processing"})
+	if !isCancellableApplicationStatus(jobApplication.Status) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Application cannot be cancelled in its current state"})
 		return
 	}
 
-	if err := e.cancelApplication(&jobApplication, req.Reason); err != nil {
+	cancelled, err := e.cancelApplication(&jobApplication, req.Reason)
+	if err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to cancel application", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel application"})
+		return
+	}
+	if !cancelled {
+		c.JSON(http.StatusConflict, gin.H{"error": "Application state changed; please try again"})
 		return
 	}
 
@@ -395,17 +418,35 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"message": "Application cancellation initiated"})
 }
 
-func (e *Endpoint) cancelApplication(jobApplication *model.JobApplication, reason *string) error {
-	if err := e.db.Model(jobApplication).
-		Where("status = ?", model.JobApplicationStatusProcessing).
+func isCancellableApplicationStatus(status model.JobApplicationStatus) bool {
+	switch status {
+	case model.JobApplicationStatusProcessing,
+		model.JobApplicationStatusStarted,
+		model.JobApplicationStatusPending,
+		model.JobApplicationStatusQueued:
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *Endpoint) cancelApplication(jobApplication *model.JobApplication, reason *string) (bool, error) {
+	result := e.db.Model(jobApplication).
+		Where("status IN ?", []model.JobApplicationStatus{
+			model.JobApplicationStatusProcessing,
+			model.JobApplicationStatusStarted,
+			model.JobApplicationStatusPending,
+			model.JobApplicationStatusQueued,
+		}).
 		Updates(map[string]any{
 			"status":              model.JobApplicationStatusCancelled,
 			"cancellation_reason": reason,
-		}).Error; err != nil {
-		return err
+		})
+	if result.Error != nil {
+		return false, result.Error
 	}
 
-	return nil
+	return result.RowsAffected > 0, nil
 }
 
 func (e *Endpoint) DeleteApplication(c *gin.Context) {
