@@ -65,14 +65,9 @@ type ApplicationQueueItem struct {
 }
 
 type InitiateApplicationWorkflowInput struct {
-	Url                   string  `json:"url"`
-	IdUser                uint    `json:"id_user"`
 	IdJobApplication      uint    `json:"id_job_application"`
-	ApplicationExternalId string  `json:"application_external_id"`
 	ApplyAutonomously     bool    `json:"apply_autonomously"`
-	IdResume              *uint   `json:"id_resume"`
 	BrowserPoolWorkflowId *string `json:"browser_pool_workflow_id"`
-	ApplicationWorkflowId *string `json:"application_workflow_id"`
 }
 
 const JOB_APPLICATION_INIT_TIMEOUT = 10 * time.Minute
@@ -135,13 +130,8 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	}
 
 	workflowInput := InitiateApplicationWorkflowInput{
-		Url:                   request.Url,
 		IdJobApplication:      jobApplication.IdJobApplication,
-		IdUser:                userId,
-		IdResume:              &resume.IdResume,
-		ApplicationExternalId: jobApplication.IdExternal.String(),
 		ApplyAutonomously:     true,
-		ApplicationWorkflowId: &applicationWorkflowId,
 		BrowserPoolWorkflowId: &e.browserPoolWorkflowId,
 	}
 	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "InitiateApplicationWorkflow", workflowInput)

@@ -36,10 +36,7 @@ type ApplyForJobRequest struct {
 }
 
 type InitiateApplicationWorkflowInput struct {
-	Url                   string  `json:"url"`
-	IdUser                uint    `json:"id_user"`
 	IdJobApplication      uint    `json:"id_job_application"`
-	ApplicationExternalId string  `json:"application_external_id"`
 	ApplyAutonomously     bool    `json:"apply_autonomously"`
 	BrowserPoolWorkflowId *string `json:"browser_pool_workflow_id"`
 }
@@ -115,11 +112,8 @@ func (e *Endpoint) InitiateApplication(c *gin.Context) {
 		ID:        workflowID,
 		TaskQueue: string(e.taskQueueName),
 	}, "InitiateApplicationWorkflow", InitiateApplicationWorkflowInput{
-		Url:                   request.Url,
-		IdUser:                userId,
-		IdJobApplication:      jobApplication.IdJobApplication,
-		ApplicationExternalId: jobApplication.IdExternal.String(),
-		ApplyAutonomously:     false,
+		IdJobApplication:  jobApplication.IdJobApplication,
+		ApplyAutonomously: false,
 	})
 	if err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to initiate application workflow", "error", err)
