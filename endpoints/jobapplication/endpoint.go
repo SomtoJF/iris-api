@@ -18,14 +18,15 @@ import (
 )
 
 type Endpoint struct {
-	db             *gorm.DB
-	temporalClient client.Client
-	logger         *slog.Logger
-	taskQueueName  temporal.TaskQueueName
+	db                    *gorm.DB
+	temporalClient        client.Client
+	logger                *slog.Logger
+	taskQueueName         temporal.TaskQueueName
+	browserPoolWorkflowId string
 }
 
-func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger, taskQueueName temporal.TaskQueueName) *Endpoint {
-	return &Endpoint{db: db, temporalClient: temporalClient, logger: logger, taskQueueName: taskQueueName}
+func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger, browserPoolWorkflowId string, taskQueueName temporal.TaskQueueName) *Endpoint {
+	return &Endpoint{db: db, temporalClient: temporalClient, logger: logger, taskQueueName: taskQueueName, browserPoolWorkflowId: browserPoolWorkflowId}
 }
 
 // resolveResume returns the resume identified by externalId (scoped to the user)
@@ -55,7 +56,18 @@ type JobApplicationWorkflowInput struct {
 	ApplicationExternalId string `json:"application_external_id"`
 }
 
-const JOB_APPLICATION_TIMEOUT = 24 * time.Hour
+type InitiateApplicationWorkflowInput struct {
+	Url                   string  `json:"url"`
+	IdUser                uint    `json:"id_user"`
+	IdJobApplication      uint    `json:"id_job_application"`
+	ApplicationExternalId string  `json:"application_external_id"`
+	ApplyAutonomously     bool    `json:"apply_autonomously"`
+	IdResume              *uint   `json:"id_resume"`
+	BrowserPoolWorkflowId *string `json:"browser_pool_workflow_id"`
+	ApplicationWorkflowId *string `json:"application_workflow_id"`
+}
+
+const JOB_APPLICATION_INIT_TIMEOUT = 10 * time.Minute
 
 func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	userId := c.GetUint("userId")
@@ -83,17 +95,17 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		return
 	}
 
-	workflowId := fmt.Sprintf("job-application-%s-%s", request.Url, uuid.New().String())
+	applicationWorkflowId := fmt.Sprintf("job-application-%s-%s", request.Url, uuid.New().String())
 
 	jobApplication := model.JobApplication{
 		Url:                   request.Url,
 		JobTitle:              "Pending-Job-Title",
 		CompanyName:           "Pending-Company-Name",
 		JobDescription:        "Pending-Job-Description",
-		Status:                model.JobApplicationStatusProcessing,
+		Status:                model.JobApplicationStatusPending,
 		UserId:                userId,
 		ResumeId:              resume.IdResume,
-		WorkflowID:            &workflowId,
+		WorkflowID:            &applicationWorkflowId,
 		AppliedUsingExtension: false,
 	}
 	if err := e.db.Create(&jobApplication).Error; err != nil {
@@ -108,20 +120,23 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	}
 
 	workflowOptions := client.StartWorkflowOptions{
-		ID:                       workflowId,
+		ID:                       fmt.Sprintf("initiate-application-%s-%s", request.Url, uuid.New().String()),
 		TaskQueue:                string(e.taskQueueName),
-		WorkflowExecutionTimeout: JOB_APPLICATION_TIMEOUT,
+		WorkflowExecutionTimeout: JOB_APPLICATION_INIT_TIMEOUT,
 		WorkflowTaskTimeout:      1 * time.Minute,
 	}
 
-	workflowInput := JobApplicationWorkflowInput{
+	workflowInput := InitiateApplicationWorkflowInput{
 		Url:                   request.Url,
 		IdJobApplication:      jobApplication.IdJobApplication,
 		IdUser:                userId,
-		IdResume:              resume.IdResume,
+		IdResume:              &resume.IdResume,
 		ApplicationExternalId: jobApplication.IdExternal.String(),
+		ApplyAutonomously:     true,
+		ApplicationWorkflowId: &applicationWorkflowId,
+		BrowserPoolWorkflowId: &e.browserPoolWorkflowId,
 	}
-	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", workflowInput)
+	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "InitiateApplicationWorkflow", workflowInput)
 	if err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to start job application workflow", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start job application process"})
