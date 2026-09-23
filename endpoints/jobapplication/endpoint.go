@@ -56,6 +56,14 @@ type JobApplicationWorkflowInput struct {
 	ApplicationExternalId string `json:"application_external_id"`
 }
 
+type ApplicationQueueItem struct {
+	IdJobApplication      uint   `json:"id_job_application"`
+	Url                   string `json:"url"`
+	IdUser                uint   `json:"id_user"`
+	IdResume              uint   `json:"id_resume"`
+	ApplicationWorkflowId string `json:"application_workflow_id"`
+}
+
 type InitiateApplicationWorkflowInput struct {
 	Url                   string  `json:"url"`
 	IdUser                uint    `json:"id_user"`
@@ -182,23 +190,21 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 		return
 	}
 
-	workflowOptions := client.StartWorkflowOptions{
-		ID:                       workflowId,
-		TaskQueue:                string(e.taskQueueName),
-		WorkflowExecutionTimeout: JOB_APPLICATION_TIMEOUT,
-		WorkflowTaskTimeout:      1 * time.Minute,
-	}
-
-	workflowInput := JobApplicationWorkflowInput{
-		Url:                   jobApplication.Url,
-		IdJobApplication:      jobApplication.IdJobApplication,
-		IdUser:                userId,
-		IdResume:              jobApplication.ResumeId,
-		ApplicationExternalId: jobApplication.IdExternal.String(),
-	}
-	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", workflowInput)
+	err = e.temporalClient.SignalWorkflow(
+		context.Background(),
+		e.browserPoolWorkflowId,
+		"",
+		"queue_application",
+		ApplicationQueueItem{
+			IdJobApplication:      jobApplication.IdJobApplication,
+			Url:                   jobApplication.Url,
+			IdUser:                userId,
+			IdResume:              jobApplication.ResumeId,
+			ApplicationWorkflowId: workflowId,
+		},
+	)
 	if err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to start job application workflow on retry", "error", err)
+		e.logger.ErrorContext(c.Request.Context(), "failed to queue job application retry", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start job application process"})
 		return
 	}
@@ -329,7 +335,8 @@ type CancelApplicationRequest struct {
 }
 
 type CancelSignalPayload struct {
-	Reason string `json:"reason"`
+	IdJobApplication uint   `json:"id_job_application"`
+	Reason           string `json:"reason"`
 }
 
 func (e *Endpoint) CancelApplication(c *gin.Context) {
@@ -362,16 +369,6 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 		return
 	}
 
-	if jobApplication.WorkflowID == nil {
-		if err := e.cancelApplication(&jobApplication, req.Reason); err != nil {
-			e.logger.ErrorContext(c.Request.Context(), "failed to cancel application", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel application"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"error": "Application cancelled"})
-		return
-	}
-
 	if err := e.cancelApplication(&jobApplication, req.Reason); err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to cancel application", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel application"})
@@ -382,17 +379,16 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 	if req.Reason != nil {
 		reason = *req.Reason
 	}
-	workflowID := *jobApplication.WorkflowID
 	go func() {
 		err := e.temporalClient.SignalWorkflow(
 			context.Background(),
-			workflowID,
+			e.browserPoolWorkflowId,
 			"",
-			"CANCEL_APPLICATION",
-			CancelSignalPayload{Reason: reason},
+			"cancel_application",
+			CancelSignalPayload{IdJobApplication: jobApplication.IdJobApplication, Reason: reason},
 		)
 		if err != nil {
-			e.logger.Error("failed to signal workflow for cancellation", "error", err, "workflowID", workflowID)
+			e.logger.Error("failed to signal browser pool for cancellation", "error", err, "idJobApplication", jobApplication.IdJobApplication)
 		}
 	}()
 
