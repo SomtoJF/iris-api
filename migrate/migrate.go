@@ -41,6 +41,12 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Println("Migrated table job application")
+	if err := db.Model(&model.JobApplication{}).
+		Where("status = ? AND workflow_id IS NULL AND applied_using_extension = ?", model.JobApplicationStatusApplied, false).
+		UpdateColumn("applied_using_extension", true).Error; err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Backfilled extension-applied job applications")
 
 	// log.Println("Starting migration on table cover letter")
 	// if err := db.AutoMigrate(&model.CoverLetter{}); err != nil {

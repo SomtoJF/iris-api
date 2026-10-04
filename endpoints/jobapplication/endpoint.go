@@ -86,14 +86,15 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	workflowId := fmt.Sprintf("job-application-%s-%s", request.Url, uuid.New().String())
 
 	jobApplication := model.JobApplication{
-		Url:            request.Url,
-		JobTitle:       "Pending-Job-Title",
-		CompanyName:    "Pending-Company-Name",
-		JobDescription: "Pending-Job-Description",
-		Status:         model.JobApplicationStatusProcessing,
-		UserId:         userId,
-		ResumeId:       resume.IdResume,
-		WorkflowID:     &workflowId,
+		Url:                   request.Url,
+		JobTitle:              "Pending-Job-Title",
+		CompanyName:           "Pending-Company-Name",
+		JobDescription:        "Pending-Job-Description",
+		Status:                model.JobApplicationStatusProcessing,
+		UserId:                userId,
+		ResumeId:              resume.IdResume,
+		WorkflowID:            &workflowId,
+		AppliedUsingExtension: false,
 	}
 	if err := e.db.Create(&jobApplication).Error; err != nil {
 		if utils.IsUniqueConstraintViolation(err) {
@@ -201,19 +202,20 @@ type FetchAllJobApplicationsRequest struct {
 }
 
 type JobApplication struct {
-	Id                 string                     `json:"id"`
-	Url                string                     `json:"url"`
-	JobTitle           string                     `json:"jobTitle"`
-	CompanyName        string                     `json:"companyName"`
-	Status             model.JobApplicationStatus `json:"status"`
-	ResponseStatus     model.ResponseStatus       `json:"responseStatus"`
-	HasApplicationData bool                       `json:"hasApplicationData"`
-	AppliedAt          *time.Time                 `json:"appliedAt,omitempty"`
-	FailureReason      *string                    `json:"failureReason,omitempty"`
-	CancellationReason *string                    `json:"cancellationReason,omitempty"`
-	HaltReason         *string                    `json:"haltReason,omitempty"`
-	CreatedAt          time.Time                  `json:"createdAt"`
-	UpdatedAt          time.Time                  `json:"updatedAt"`
+	Id                    string                     `json:"id"`
+	Url                   string                     `json:"url"`
+	JobTitle              string                     `json:"jobTitle"`
+	CompanyName           string                     `json:"companyName"`
+	Status                model.JobApplicationStatus `json:"status"`
+	ResponseStatus        model.ResponseStatus       `json:"responseStatus"`
+	HasApplicationData    bool                       `json:"hasApplicationData"`
+	AppliedUsingExtension bool                       `json:"appliedUsingExtension"`
+	AppliedAt             *time.Time                 `json:"appliedAt,omitempty"`
+	FailureReason         *string                    `json:"failureReason,omitempty"`
+	CancellationReason    *string                    `json:"cancellationReason,omitempty"`
+	HaltReason            *string                    `json:"haltReason,omitempty"`
+	CreatedAt             time.Time                  `json:"createdAt"`
+	UpdatedAt             time.Time                  `json:"updatedAt"`
 }
 
 type FetchAllJobApplicationsResponse struct {
@@ -274,19 +276,20 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	applications := make([]JobApplication, 0, len(jobApplications))
 	for _, jobApplication := range jobApplications {
 		applications = append(applications, JobApplication{
-			Id:                 jobApplication.IdExternal.String(),
-			Url:                jobApplication.Url,
-			JobTitle:           jobApplication.JobTitle,
-			CompanyName:        jobApplication.CompanyName,
-			Status:             jobApplication.Status,
-			ResponseStatus:     jobApplication.ResponseStatus,
-			HasApplicationData: jobApplication.JobApplicationData != nil,
-			FailureReason:      jobApplication.FailureReason,
-			CancellationReason: jobApplication.CancellationReason,
-			HaltReason:         jobApplication.HaltReason,
-			AppliedAt:          jobApplication.AppliedAt,
-			CreatedAt:          jobApplication.CreatedAt,
-			UpdatedAt:          jobApplication.UpdatedAt,
+			Id:                    jobApplication.IdExternal.String(),
+			Url:                   jobApplication.Url,
+			JobTitle:              jobApplication.JobTitle,
+			CompanyName:           jobApplication.CompanyName,
+			Status:                jobApplication.Status,
+			ResponseStatus:        jobApplication.ResponseStatus,
+			HasApplicationData:    jobApplication.JobApplicationData != nil,
+			AppliedUsingExtension: jobApplication.AppliedUsingExtension,
+			FailureReason:         jobApplication.FailureReason,
+			CancellationReason:    jobApplication.CancellationReason,
+			HaltReason:            jobApplication.HaltReason,
+			AppliedAt:             jobApplication.AppliedAt,
+			CreatedAt:             jobApplication.CreatedAt,
+			UpdatedAt:             jobApplication.UpdatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": FetchAllJobApplicationsResponse{
@@ -550,17 +553,18 @@ type ResumeSummary struct {
 }
 
 type JobApplicationComprehensiveResponse struct {
-	Id                string                          `json:"id"`
-	AppliedAt         *time.Time                      `json:"appliedAt,omitempty"`
-	Url               string                          `json:"url"`
-	JobTitle          string                          `json:"jobTitle"`
-	CompanyName       string                          `json:"companyName"`
-	Status            string                          `json:"status"`
-	Questions         []model.JobApplicationQuestions `json:"questions"`
-	JobDescription    string                          `json:"jobDescription"`
-	CoverLetter       *string                         `json:"coverLetter"`
-	CoverLetterStatus model.CoverLetterStatus         `json:"coverLetterStatus,omitempty"`
-	Resume            ResumeSummary                   `json:"resume"`
+	Id                    string                          `json:"id"`
+	AppliedAt             *time.Time                      `json:"appliedAt,omitempty"`
+	AppliedUsingExtension bool                            `json:"appliedUsingExtension"`
+	Url                   string                          `json:"url"`
+	JobTitle              string                          `json:"jobTitle"`
+	CompanyName           string                          `json:"companyName"`
+	Status                string                          `json:"status"`
+	Questions             []model.JobApplicationQuestions `json:"questions"`
+	JobDescription        string                          `json:"jobDescription"`
+	CoverLetter           *string                         `json:"coverLetter"`
+	CoverLetterStatus     model.CoverLetterStatus         `json:"coverLetterStatus,omitempty"`
+	Resume                ResumeSummary                   `json:"resume"`
 }
 
 // get /jobs/:id/comprehensive
@@ -598,16 +602,17 @@ func (e *Endpoint) FetchJobApplicationComprehensive(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": JobApplicationComprehensiveResponse{
-		Id:                jobApplication.IdExternal.String(),
-		Url:               jobApplication.Url,
-		JobTitle:          jobApplication.JobTitle,
-		CompanyName:       jobApplication.CompanyName,
-		Status:            string(jobApplication.Status),
-		Questions:         questions,
-		JobDescription:    jobApplication.JobDescription,
-		CoverLetter:       coverLetter,
-		CoverLetterStatus: coverLetterStatus,
-		AppliedAt:         jobApplication.AppliedAt,
+		Id:                    jobApplication.IdExternal.String(),
+		AppliedUsingExtension: jobApplication.AppliedUsingExtension,
+		Url:                   jobApplication.Url,
+		JobTitle:              jobApplication.JobTitle,
+		CompanyName:           jobApplication.CompanyName,
+		Status:                string(jobApplication.Status),
+		Questions:             questions,
+		JobDescription:        jobApplication.JobDescription,
+		CoverLetter:           coverLetter,
+		CoverLetterStatus:     coverLetterStatus,
+		AppliedAt:             jobApplication.AppliedAt,
 		Resume: ResumeSummary{
 			Id:          jobApplication.Resume.IdExternal.String(),
 			DisplayName: jobApplication.Resume.DisplayName,
