@@ -2,6 +2,7 @@ package jobapplication
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Endpoint struct {
@@ -62,6 +64,8 @@ type ApplicationQueueItem struct {
 	IdUser                uint   `json:"id_user"`
 	IdResume              uint   `json:"id_resume"`
 	ApplicationWorkflowId string `json:"application_workflow_id"`
+	NewReplayGeneration   bool   `json:"new_replay_generation,omitempty"`
+	ResumeUserActionID    uint   `json:"resume_user_action_id,omitempty"`
 }
 
 type InitiateApplicationWorkflowInput struct {
@@ -209,6 +213,7 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 			IdUser:                userId,
 			IdResume:              jobApplication.ResumeId,
 			ApplicationWorkflowId: workflowId,
+			NewReplayGeneration:   true,
 		},
 	)
 	if err != nil {
@@ -336,6 +341,7 @@ type UserActionResponse struct {
 	Layout         model.UserActionLayout `json:"layout"`
 	WorkflowID     string                 `json:"workflow_id"`
 	SignalName     string                 `json:"signal_name"`
+	DurablePause   bool                   `json:"durable_pause"`
 }
 
 type CancelApplicationRequest struct {
@@ -571,7 +577,8 @@ func (e *Endpoint) GetUserAction(c *gin.Context) {
 	}
 
 	var userAction model.UserAction
-	if err := e.db.Where("id_job_application = ? AND is_pending = ?", jobApp.IdJobApplication, true).
+	if err := e.db.Where("id_job_application = ? AND (is_pending = ? OR (durable_pause = ? AND submitted_at IS NOT NULL AND resume_enqueued_at IS NULL))",
+		jobApp.IdJobApplication, true, true).
 		Order("created_at ASC").
 		First(&userAction).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "No pending user action found"})
@@ -585,7 +592,192 @@ func (e *Endpoint) GetUserAction(c *gin.Context) {
 		Layout:         userAction.UserActionLayout,
 		WorkflowID:     userAction.WorkflowID,
 		SignalName:     "USER_ACTION_RESULT",
+		DurablePause:   userAction.DurablePause,
 	})
+}
+
+type SubmitUserActionRequest struct {
+	UserActionID uint                         `json:"user_action_id" binding:"required"`
+	Values       []model.UserActionResultItem `json:"values" binding:"required"`
+}
+
+type invalidUserActionSubmission string
+
+func (e invalidUserActionSubmission) Error() string { return string(e) }
+
+func isInvalidUserActionSubmission(err error) bool {
+	var invalid invalidUserActionSubmission
+	return errors.As(err, &invalid)
+}
+
+func (e *Endpoint) SubmitUserAction(c *gin.Context) {
+	userID := c.GetUint("userId")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	externalID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		return
+	}
+	var request SubmitUserActionRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var application model.JobApplication
+	if err := e.db.Where("id_external = ? AND id_user = ? AND deleted_at IS NULL", externalID, userID).First(&application).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+		return
+	}
+	var action model.UserAction
+	if err := e.db.Where("id_user_action = ? AND id_job_application = ? AND id_user = ?", request.UserActionID, application.IdJobApplication, userID).First(&action).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User action not found"})
+		return
+	}
+	if !action.DurablePause {
+		if err := validateUserActionValues(action.UserActionLayout, request.Values); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := e.temporalClient.SignalWorkflow(c.Request.Context(), action.WorkflowID, "", "USER_ACTION_RESULT", request.Values); err != nil {
+			e.logger.ErrorContext(c.Request.Context(), "failed to deliver legacy user action signal", "error", err)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Failed to submit user action"})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"message": "Action submitted"})
+		return
+	}
+
+	err = e.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id_user_action = ? AND id_job_application = ? AND id_user = ?", request.UserActionID, application.IdJobApplication, userID).
+			First(&action).Error; err != nil {
+			return err
+		}
+		if action.SubmittedAt == nil {
+			if !action.IsPending {
+				return gorm.ErrRecordNotFound
+			}
+			if err := validateUserActionValues(action.UserActionLayout, request.Values); err != nil {
+				return err
+			}
+			plain, err := json.Marshal(request.Values)
+			if err != nil {
+				return fmt.Errorf("encode user action values: %w", err)
+			}
+			ciphertext, err := utils.EncryptUserActionResult(string(plain), action.IdExternal)
+			if err != nil {
+				return err
+			}
+			resumeWorkflowID := "job-application-resume-" + uuid.NewString()
+			now := time.Now().UTC()
+			if err := tx.Model(&action).Updates(map[string]any{
+				"result_ciphertext":  ciphertext,
+				"submitted_at":       now,
+				"is_pending":         false,
+				"resume_workflow_id": resumeWorkflowID,
+			}).Error; err != nil {
+				return err
+			}
+			action.ResultCiphertext = ciphertext
+			action.SubmittedAt = &now
+			action.IsPending = false
+			action.ResumeWorkflowID = resumeWorkflowID
+
+			updated := tx.Model(&model.JobApplication{}).
+				Where("id_job_application = ? AND status = ?", application.IdJobApplication, model.JobApplicationStatusBlocked).
+				Update("status", model.JobApplicationStatusProcessing)
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected == 0 {
+				return fmt.Errorf("application is no longer blocked")
+			}
+		}
+		if len(action.ResultCiphertext) == 0 || action.ResumeWorkflowID == "" {
+			return fmt.Errorf("submitted user action is missing resume data")
+		}
+		return nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			c.JSON(http.StatusConflict, gin.H{"error": "User action is no longer pending"})
+		case isInvalidUserActionSubmission(err):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			e.logger.ErrorContext(c.Request.Context(), "failed to persist user action submission", "error", err)
+			if err.Error() == "application is no longer blocked" {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to submit user action"})
+		}
+		return
+	}
+
+	queueItem := buildUserActionResumeQueueItem(application, action, userID)
+	if err := e.temporalClient.SignalWorkflow(c.Request.Context(), e.browserPoolWorkflowId, "", "queue_application", queueItem); err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to requeue application after user action", "error", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Answers saved; application requeue will retry"})
+		return
+	}
+	now := time.Now().UTC()
+	if err := e.db.Model(&model.UserAction{}).
+		Where("id_user_action = ? AND id_user = ? AND submitted_at IS NOT NULL AND resume_enqueued_at IS NULL", action.IdUserAction, userID).
+		Update("resume_enqueued_at", now).Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to mark user-action resume as queued", "error", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Answers saved; application resume will retry"})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"message": "Application resumed"})
+}
+
+func buildUserActionResumeQueueItem(application model.JobApplication, action model.UserAction, userID uint) ApplicationQueueItem {
+	return ApplicationQueueItem{
+		IdJobApplication:      application.IdJobApplication,
+		Url:                   application.Url,
+		IdUser:                userID,
+		IdResume:              application.ResumeId,
+		ApplicationWorkflowId: action.ResumeWorkflowID,
+		ResumeUserActionID:    action.IdUserAction,
+	}
+}
+
+func validateUserActionValues(layout model.UserActionLayout, values []model.UserActionResultItem) error {
+	if len(layout) == 0 || len(values) != len(layout) {
+		return invalidUserActionSubmission("submitted answers do not match the requested fields")
+	}
+	expected := make(map[string]struct{}, len(layout))
+	for _, item := range layout {
+		if item.FieldName == "" {
+			return invalidUserActionSubmission("user action contains an unnamed field")
+		}
+		if _, exists := expected[item.FieldName]; exists {
+			return invalidUserActionSubmission("user action contains duplicate fields")
+		}
+		expected[item.FieldName] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if _, ok := expected[value.FieldName]; !ok {
+			return invalidUserActionSubmission("submitted answer contains an unknown field")
+		}
+		if _, exists := seen[value.FieldName]; exists {
+			return invalidUserActionSubmission("submitted answer contains duplicate fields")
+		}
+		seen[value.FieldName] = struct{}{}
+		if len(value.Value) > 10000 {
+			return invalidUserActionSubmission("submitted answer exceeds the allowed size")
+		}
+	}
+	if len(seen) != len(expected) {
+		return invalidUserActionSubmission("submitted answers do not match the requested fields")
+	}
+	return nil
 }
 
 type ResumeSummary struct {

@@ -36,17 +36,59 @@ func main() {
 	// 	log.Fatal(err)
 	// }
 
-	log.Println("Starting migration on table job application")
-	if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
+	// log.Println("Starting migration on table job application")
+	// if err := db.AutoMigrate(&model.JobApplication{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Migrated table job application")
+
+	log.Println("Starting migration on table user action")
+	if err := db.AutoMigrate(&model.UserAction{}); err != nil {
 		log.Fatal(err)
 	}
-	log.Println("Migrated table job application")
-	if err := db.Model(&model.JobApplication{}).
-		Where("status = ? AND workflow_id IS NULL AND applied_using_extension = ?", model.JobApplicationStatusApplied, false).
-		UpdateColumn("applied_using_extension", true).Error; err != nil {
+	log.Println("Migrated table user action")
+
+	log.Println("Starting migration on table browser vault")
+	if err := db.AutoMigrate(&model.BrowserVault{}); err != nil {
 		log.Fatal(err)
 	}
-	log.Println("Backfilled extension-applied job applications")
+	log.Println("Migrated table browser vault")
+
+	log.Println("Starting migration on table browser profile")
+	if err := db.AutoMigrate(&model.BrowserProfile{}); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Migrated table browser profile")
+
+	log.Println("Starting migration on table browser auth connection")
+	if err := db.AutoMigrate(&model.BrowserAuthConnection{}); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Migrated table browser auth connection")
+
+	log.Println("Starting migration on table browser session")
+	if err := db.AutoMigrate(&model.BrowserSession{}); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Migrated table browser session")
+
+	log.Println("Starting migration on table browser replay attempt")
+	if err := db.AutoMigrate(&model.BrowserReplayAttempt{}); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Migrated table browser replay attempt")
+
+	log.Println("Starting migration on table browser mutation changelog")
+	if err := db.AutoMigrate(&model.BrowserMutationChangelog{}); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Migrated table browser mutation changelog")
+	// if err := db.Model(&model.JobApplication{}).
+	// 	Where("status = ? AND workflow_id IS NULL AND applied_using_extension = ?", model.JobApplicationStatusApplied, false).
+	// 	UpdateColumn("applied_using_extension", true).Error; err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Backfilled extension-applied job applications")
 
 	// log.Println("Starting migration on table cover letter")
 	// if err := db.AutoMigrate(&model.CoverLetter{}); err != nil {
@@ -180,7 +222,7 @@ func migrateCoverLettersFromJobApplications() {
 	hardDeleteCoverLetterOnlyApplications()
 
 	log.Println("Dropping cover_letter_only column from job_application")
-	if err := db.Exec("ALTER TABLE job_application DROP COLUMN IF EXISTS cover_letter_only").Error; err != nil {
+	if err := db.Migrator().DropColumn(&model.JobApplication{}, "cover_letter_only"); err != nil {
 		log.Fatal(err)
 	}
 	log.Println("Dropped cover_letter_only column")

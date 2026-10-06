@@ -146,6 +146,8 @@ func main() {
 		protected.DELETE("/jobs/:id", jobEndpoint.DeleteApplication)
 		protected.PATCH("/jobs/:id", jobEndpoint.PatchJobApplication)
 		protected.GET("/jobs/:id/user-action", jobEndpoint.GetUserAction)
+		protected.POST("/jobs/:id/user-action/submit", jobEndpoint.SubmitUserAction)
+		protected.GET("/jobs/:id/live-view", jobEndpoint.GetApplicationLiveViewURL)
 		protected.GET("/jobs/:id/comprehensive", jobEndpoint.FetchJobApplicationComprehensive)
 		protected.GET("/jobs", jobEndpoint.FetchAllJobApplications)
 		protected.GET("/jobs/:id/application-data", jobApplicationDataEndpoint.GetJobApplicationData)
