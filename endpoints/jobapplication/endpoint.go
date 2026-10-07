@@ -185,7 +185,7 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 			model.JobApplicationStatusHalted,
 		}).
 		Updates(map[string]any{
-			"status":              model.JobApplicationStatusProcessing,
+			"status":              model.JobApplicationStatusQueued,
 			"workflow_id":         &workflowId,
 			"created_at":          time.Now(),
 			"failure_reason":      nil,
