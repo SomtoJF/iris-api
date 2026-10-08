@@ -409,18 +409,35 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 	if req.Reason != nil {
 		reason = *req.Reason
 	}
-	go func() {
-		err := e.temporalClient.SignalWorkflow(
-			context.Background(),
-			e.browserPoolWorkflowId,
-			"",
-			"cancel_application",
-			CancelSignalPayload{IdJobApplication: jobApplication.IdJobApplication, Reason: reason},
-		)
-		if err != nil {
-			e.logger.Error("failed to signal browser pool for cancellation", "error", err, "idJobApplication", jobApplication.IdJobApplication)
-		}
-	}()
+
+	if jobApplication.WorkflowID != nil && *jobApplication.WorkflowID != "" {
+		go func() {
+			for attempt := 0; attempt < 5; attempt++ {
+				if attempt > 0 {
+					time.Sleep(time.Duration(attempt*10) * time.Second)
+				}
+
+				err := e.temporalClient.SignalWorkflow(
+					context.Background(),
+					e.browserPoolWorkflowId,
+					"",
+					"cancel_application",
+					CancelSignalPayload{
+						IdJobApplication: jobApplication.IdJobApplication,
+						Reason:           reason,
+					},
+				)
+				if err == nil {
+					return
+				}
+
+				e.logger.Error("failed to signal browser pool for cancellation",
+					"error", err,
+					"idJobApplication", jobApplication.IdJobApplication,
+				)
+			}
+		}()
+	}
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Application cancellation initiated"})
 }
