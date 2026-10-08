@@ -42,47 +42,47 @@ func main() {
 	// }
 	// log.Println("Migrated table job application")
 
-	log.Println("Starting migration on table user action")
-	if err := db.AutoMigrate(&model.UserAction{}); err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Migrated table user action")
+	// log.Println("Starting migration on table user action")
+	// if err := db.AutoMigrate(&model.UserAction{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Migrated table user action")
 
-	log.Println("Starting migration on table browser vault")
-	if err := db.AutoMigrate(&model.BrowserVault{}); err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Migrated table browser vault")
+	// log.Println("Starting migration on table browser vault")
+	// if err := db.AutoMigrate(&model.BrowserVault{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Migrated table browser vault")
 
-	log.Println("Starting migration on table browser profile")
-	if err := db.AutoMigrate(&model.BrowserProfile{}); err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Migrated table browser profile")
+	// log.Println("Starting migration on table browser profile")
+	// if err := db.AutoMigrate(&model.BrowserProfile{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Migrated table browser profile")
 
-	log.Println("Starting migration on table browser auth connection")
-	if err := db.AutoMigrate(&model.BrowserAuthConnection{}); err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Migrated table browser auth connection")
+	// log.Println("Starting migration on table browser auth connection")
+	// if err := db.AutoMigrate(&model.BrowserAuthConnection{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Migrated table browser auth connection")
 
-	log.Println("Starting migration on table browser session")
-	if err := db.AutoMigrate(&model.BrowserSession{}); err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Migrated table browser session")
+	// log.Println("Starting migration on table browser session")
+	// if err := db.AutoMigrate(&model.BrowserSession{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Migrated table browser session")
 
-	log.Println("Starting migration on table browser replay attempt")
-	if err := db.AutoMigrate(&model.BrowserReplayAttempt{}); err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Migrated table browser replay attempt")
+	// log.Println("Starting migration on table browser replay attempt")
+	// if err := db.AutoMigrate(&model.BrowserReplayAttempt{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Migrated table browser replay attempt")
 
-	log.Println("Starting migration on table browser mutation changelog")
-	if err := db.AutoMigrate(&model.BrowserMutationChangelog{}); err != nil {
-		log.Fatal(err)
-	}
-	log.Println("Migrated table browser mutation changelog")
+	// log.Println("Starting migration on table browser mutation changelog")
+	// if err := db.AutoMigrate(&model.BrowserMutationChangelog{}); err != nil {
+	// 	log.Fatal(err)
+	// }
+	// log.Println("Migrated table browser mutation changelog")
 	// if err := db.Model(&model.JobApplication{}).
 	// 	Where("status = ? AND workflow_id IS NULL AND applied_using_extension = ?", model.JobApplicationStatusApplied, false).
 	// 	UpdateColumn("applied_using_extension", true).Error; err != nil {

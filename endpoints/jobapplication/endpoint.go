@@ -178,7 +178,9 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 
 	workflowId := fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String())
 
-	result := e.db.Model(&jobApplication).
+	tx := e.db.Begin()
+
+	result := tx.Model(&jobApplication).
 		Where("status IN ?", []model.JobApplicationStatus{
 			model.JobApplicationStatusFailed,
 			model.JobApplicationStatusCancelled,
@@ -193,11 +195,13 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 			"cancellation_reason": nil,
 		})
 	if result.Error != nil {
+		// no need to rollback here as nothing was updated
 		e.logger.ErrorContext(c.Request.Context(), "failed to update job application on retry", "error", result.Error)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
 		return
 	}
 	if result.RowsAffected == 0 {
+		// no need to rollback here nothing was updated
 		c.JSON(http.StatusConflict, gin.H{"error": "Application state changed; please try again"})
 		return
 	}
@@ -217,8 +221,15 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 		},
 	)
 	if err != nil {
+		tx.Rollback()
 		e.logger.ErrorContext(c.Request.Context(), "failed to queue job application retry", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start job application process"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to queue job application process"})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to commit transaction", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
 		return
 	}
 
