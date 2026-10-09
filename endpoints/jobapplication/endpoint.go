@@ -138,14 +138,28 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		ApplyAutonomously:     true,
 		BrowserPoolWorkflowId: &e.browserPoolWorkflowId,
 	}
-	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "InitiateApplicationWorkflow", workflowInput)
-	if err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to start job application workflow", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start job application process"})
-		return
-	}
+	go func() {
+		run, err := e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "InitiateApplicationWorkflow", workflowInput)
+		if err != nil {
+			e.logger.Error("failed to start job application workflow", "error", err, "id_job_application", jobApplication.IdJobApplication)
+			e.softDeleteApplication(&jobApplication)
+			return
+		}
+
+		if err := run.Get(context.Background(), nil); err != nil {
+			e.logger.Error("failed to get job application workflow result", "error", err, "id_job_application", jobApplication.IdJobApplication)
+			e.softDeleteApplication(&jobApplication)
+		}
+	}()
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Job application initiated"})
+}
+
+func (e *Endpoint) softDeleteApplication(jobApplication *model.JobApplication) {
+	now := time.Now()
+	if err := e.db.Model(jobApplication).Update("deleted_at", &now).Error; err != nil {
+		e.logger.Error("failed to soft-delete job application after initiate failure", "error", err, "id_job_application", jobApplication.IdJobApplication)
+	}
 }
 
 // post /job/:id/retry-application
