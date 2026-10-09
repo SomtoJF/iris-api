@@ -11,6 +11,12 @@ type JobApplicationStatus string
 const (
 	// currently processing the job application
 	JobApplicationStatusProcessing JobApplicationStatus = "processing"
+	// request accepted no processing started yet
+	JobApplicationStatusPending JobApplicationStatus = "pending"
+	// started manually using extension but not completed
+	JobApplicationStatusStarted JobApplicationStatus = "started"
+	// queued by worker
+	JobApplicationStatusQueued JobApplicationStatus = "queued"
 	// successfully applied to the job
 	JobApplicationStatusApplied JobApplicationStatus = "applied"
 	// failed to apply to the job
@@ -44,9 +50,10 @@ type JobApplication struct {
 	JobApplicationData *JobApplicationData `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
 	CoverLetter        *CoverLetter        `gorm:"foreignKey:JobApplicationId;references:IdJobApplication"`
 	// application status
-	Status         JobApplicationStatus `gorm:"type:varchar(50);not null;index"`
-	ResponseStatus ResponseStatus       `gorm:"type:varchar(50);not null;index;default:none"`
-	WorkflowID     *string              `gorm:"type:text;default:NULL"`
+	Status                JobApplicationStatus `gorm:"type:varchar(50);not null;index"`
+	ResponseStatus        ResponseStatus       `gorm:"type:varchar(50);not null;index;default:none"`
+	WorkflowID            *string              `gorm:"type:text;default:NULL"`
+	AppliedUsingExtension bool                 `gorm:"not null;default:false"`
 
 	FailureReason      *string    `gorm:"type:text;default:NULL"`
 	CancellationReason *string    `gorm:"type:text;default:NULL"`

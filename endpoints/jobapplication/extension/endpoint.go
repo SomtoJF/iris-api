@@ -36,9 +36,9 @@ type ApplyForJobRequest struct {
 }
 
 type InitiateApplicationWorkflowInput struct {
-	Url              string `json:"url"`
-	IdUser           uint   `json:"id_user"`
-	IdJobApplication uint   `json:"id_job_application"`
+	IdJobApplication      uint    `json:"id_job_application"`
+	ApplyAutonomously     bool    `json:"apply_autonomously"`
+	BrowserPoolWorkflowId *string `json:"browser_pool_workflow_id"`
 }
 
 type InitiateApplicationWorkflowResponse struct {
@@ -48,12 +48,13 @@ type InitiateApplicationWorkflowResponse struct {
 }
 
 type InitiateApplicationResponse struct {
-	Id          string                     `json:"id"`
-	Url         string                     `json:"url"`
-	JobTitle    string                     `json:"jobTitle"`
-	CompanyName string                     `json:"companyName"`
-	Status      model.JobApplicationStatus `json:"status"`
-	UpdatedAt   time.Time                  `json:"updatedAt"`
+	Id                    string                     `json:"id"`
+	Url                   string                     `json:"url"`
+	JobTitle              string                     `json:"jobTitle"`
+	CompanyName           string                     `json:"companyName"`
+	Status                model.JobApplicationStatus `json:"status"`
+	AppliedUsingExtension bool                       `json:"appliedUsingExtension"`
+	UpdatedAt             time.Time                  `json:"updatedAt"`
 }
 
 func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger, taskQueueName temporal.TaskQueueName) *Endpoint {
@@ -92,7 +93,7 @@ func (e *Endpoint) InitiateApplication(c *gin.Context) {
 		JobTitle:       "Pending-Job-Title",
 		CompanyName:    "Pending-Company-Name",
 		JobDescription: "Pending-Job-Description",
-		Status:         model.JobApplicationStatusProcessing,
+		Status:         model.JobApplicationStatusStarted,
 		UserId:         userId,
 		ResumeId:       resume.IdResume,
 	}
@@ -111,9 +112,8 @@ func (e *Endpoint) InitiateApplication(c *gin.Context) {
 		ID:        workflowID,
 		TaskQueue: string(e.taskQueueName),
 	}, "InitiateApplicationWorkflow", InitiateApplicationWorkflowInput{
-		Url:              request.Url,
-		IdUser:           userId,
-		IdJobApplication: jobApplication.IdJobApplication,
+		IdJobApplication:  jobApplication.IdJobApplication,
+		ApplyAutonomously: false,
 	})
 	if err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to initiate application workflow", "error", err)
@@ -130,24 +130,14 @@ func (e *Endpoint) InitiateApplication(c *gin.Context) {
 		return
 	}
 
-	if err := e.db.Model(&jobApplication).Updates(map[string]any{
-		"job_title":       workflowResponse.JobTitle,
-		"company_name":    workflowResponse.CompanyName,
-		"job_description": workflowResponse.JobDescription,
-	}).Error; err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to update job application after initiate", "error", err)
-		e.softDeleteApplication(c, &jobApplication)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
-		return
-	}
-
 	c.JSON(http.StatusOK, gin.H{"data": InitiateApplicationResponse{
-		Id:          jobApplication.IdExternal.String(),
-		Url:         jobApplication.Url,
-		JobTitle:    workflowResponse.JobTitle,
-		CompanyName: workflowResponse.CompanyName,
-		Status:      jobApplication.Status,
-		UpdatedAt:   time.Now(),
+		Id:                    jobApplication.IdExternal.String(),
+		Url:                   jobApplication.Url,
+		JobTitle:              workflowResponse.JobTitle,
+		CompanyName:           workflowResponse.CompanyName,
+		Status:                jobApplication.Status,
+		AppliedUsingExtension: jobApplication.AppliedUsingExtension,
+		UpdatedAt:             time.Now(),
 	}})
 }
 
@@ -498,8 +488,9 @@ func (e *Endpoint) MarkAsApplied(c *gin.Context) {
 	now := time.Now()
 
 	if err := e.db.Model(&jobApplication).Updates(map[string]any{
-		"status":     model.JobApplicationStatusApplied,
-		"applied_at": &now,
+		"status":                  model.JobApplicationStatusApplied,
+		"applied_at":              &now,
+		"applied_using_extension": true,
 	}).Error; err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to mark application as applied", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to mark application as applied"})

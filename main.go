@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"log/slog"
 	"os"
@@ -50,6 +51,10 @@ func main() {
 	redisPubSub := dependencies.GetRedisPubSub()
 	redisClient := dependencies.GetRedisClient()
 	posthogClient := dependencies.GetPosthogClient()
+	browserPoolWorkflowId := os.Getenv("BROWSER_POOL_WORKFLOW_ID")
+	if browserPoolWorkflowId == "" {
+		log.Fatal(errors.New("must set browser pool workflow ID"))
+	}
 
 	baseHandler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
@@ -102,7 +107,7 @@ func main() {
 
 	authEndpoint := auth.NewEndpoint(db, os.Getenv("CLIENT_DOMAIN"), logger)
 	healthEndpoint := health.NewEndpoint()
-	jobEndpoint := jobapplication.NewEndpoint(db, temporalClient, logger, temporal.JobApplicationTaskQueueName)
+	jobEndpoint := jobapplication.NewEndpoint(db, temporalClient, logger, browserPoolWorkflowId, temporal.JobApplicationTaskQueueName)
 	jobSearchEndpoint := jobsearch.NewEndpoint(db, temporalClient, redisClient, logger, temporal.JobApplicationTaskQueueName)
 	realtimeEventsEndpoint := realtimeeventsse.NewEndpoint(redisPubSub, logger)
 	resumeEndpoint := resume.NewEndpoint(db, s3Manager, logger, temporalClient, temporal.JobApplicationTaskQueueName)
@@ -141,6 +146,8 @@ func main() {
 		protected.DELETE("/jobs/:id", jobEndpoint.DeleteApplication)
 		protected.PATCH("/jobs/:id", jobEndpoint.PatchJobApplication)
 		protected.GET("/jobs/:id/user-action", jobEndpoint.GetUserAction)
+		protected.POST("/jobs/:id/user-action/submit", jobEndpoint.SubmitUserAction)
+		protected.GET("/jobs/:id/live-view", jobEndpoint.GetApplicationLiveViewURL)
 		protected.GET("/jobs/:id/comprehensive", jobEndpoint.FetchJobApplicationComprehensive)
 		protected.GET("/jobs", jobEndpoint.FetchAllJobApplications)
 		protected.GET("/jobs/:id/application-data", jobApplicationDataEndpoint.GetJobApplicationData)

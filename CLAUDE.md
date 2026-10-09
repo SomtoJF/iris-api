@@ -8,4 +8,6 @@ Migrations run via GORM AutoMigrate calls in `migrate/migrate.go`; most are kept
 
 ## Cross-repo model dependency
 
-iris-worker imports `github.com/SomtoJF/iris-api/model` via a local `replace` and vendors it. After changing anything in `model/`, run `go mod vendor` in ../iris-worker and commit its vendor/ changes — worker deploy builds use `-mod=vendor` and won't pick up model changes otherwise.
+`iris-api/model` is the source of truth for database models shared with iris-worker. Keep each model in its own file; do not combine multiple model structs in one file. iris-worker must reference shared models through type aliases to `github.com/SomtoJF/iris-api/model`, not duplicate their definitions.
+
+iris-worker imports the API module via a local `replace` and vendors it. After changing anything in `model/`, run `go mod vendor` in `../iris-worker` and commit its `vendor/` changes — worker deploy builds use `-mod=vendor` and won't pick up model changes otherwise.

@@ -2,6 +2,7 @@ package jobapplication
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -15,17 +16,19 @@ import (
 	"github.com/google/uuid"
 	"go.temporal.io/sdk/client"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Endpoint struct {
-	db             *gorm.DB
-	temporalClient client.Client
-	logger         *slog.Logger
-	taskQueueName  temporal.TaskQueueName
+	db                    *gorm.DB
+	temporalClient        client.Client
+	logger                *slog.Logger
+	taskQueueName         temporal.TaskQueueName
+	browserPoolWorkflowId string
 }
 
-func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger, taskQueueName temporal.TaskQueueName) *Endpoint {
-	return &Endpoint{db: db, temporalClient: temporalClient, logger: logger, taskQueueName: taskQueueName}
+func NewEndpoint(db *gorm.DB, temporalClient client.Client, logger *slog.Logger, browserPoolWorkflowId string, taskQueueName temporal.TaskQueueName) *Endpoint {
+	return &Endpoint{db: db, temporalClient: temporalClient, logger: logger, taskQueueName: taskQueueName, browserPoolWorkflowId: browserPoolWorkflowId}
 }
 
 // resolveResume returns the resume identified by externalId (scoped to the user)
@@ -55,7 +58,23 @@ type JobApplicationWorkflowInput struct {
 	ApplicationExternalId string `json:"application_external_id"`
 }
 
-const JOB_APPLICATION_TIMEOUT = 24 * time.Hour
+type ApplicationQueueItem struct {
+	IdJobApplication      uint   `json:"id_job_application"`
+	Url                   string `json:"url"`
+	IdUser                uint   `json:"id_user"`
+	IdResume              uint   `json:"id_resume"`
+	ApplicationWorkflowId string `json:"application_workflow_id"`
+	NewReplayGeneration   bool   `json:"new_replay_generation,omitempty"`
+	ResumeUserActionID    uint   `json:"resume_user_action_id,omitempty"`
+}
+
+type InitiateApplicationWorkflowInput struct {
+	IdJobApplication      uint    `json:"id_job_application"`
+	ApplyAutonomously     bool    `json:"apply_autonomously"`
+	BrowserPoolWorkflowId *string `json:"browser_pool_workflow_id"`
+}
+
+const JOB_APPLICATION_INIT_TIMEOUT = 10 * time.Minute
 
 func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	userId := c.GetUint("userId")
@@ -83,17 +102,18 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 		return
 	}
 
-	workflowId := fmt.Sprintf("job-application-%s-%s", request.Url, uuid.New().String())
+	applicationWorkflowId := fmt.Sprintf("job-application-%s-%s", request.Url, uuid.New().String())
 
 	jobApplication := model.JobApplication{
-		Url:            request.Url,
-		JobTitle:       "Pending-Job-Title",
-		CompanyName:    "Pending-Company-Name",
-		JobDescription: "Pending-Job-Description",
-		Status:         model.JobApplicationStatusProcessing,
-		UserId:         userId,
-		ResumeId:       resume.IdResume,
-		WorkflowID:     &workflowId,
+		Url:                   request.Url,
+		JobTitle:              "Pending-Job-Title",
+		CompanyName:           "Pending-Company-Name",
+		JobDescription:        "Pending-Job-Description",
+		Status:                model.JobApplicationStatusPending,
+		UserId:                userId,
+		ResumeId:              resume.IdResume,
+		WorkflowID:            &applicationWorkflowId,
+		AppliedUsingExtension: false,
 	}
 	if err := e.db.Create(&jobApplication).Error; err != nil {
 		if utils.IsUniqueConstraintViolation(err) {
@@ -107,20 +127,18 @@ func (e *Endpoint) ApplyForJob(c *gin.Context) {
 	}
 
 	workflowOptions := client.StartWorkflowOptions{
-		ID:                       workflowId,
+		ID:                       fmt.Sprintf("initiate-application-%s-%s", request.Url, uuid.New().String()),
 		TaskQueue:                string(e.taskQueueName),
-		WorkflowExecutionTimeout: JOB_APPLICATION_TIMEOUT,
+		WorkflowExecutionTimeout: JOB_APPLICATION_INIT_TIMEOUT,
 		WorkflowTaskTimeout:      1 * time.Minute,
 	}
 
-	workflowInput := JobApplicationWorkflowInput{
-		Url:                   request.Url,
+	workflowInput := InitiateApplicationWorkflowInput{
 		IdJobApplication:      jobApplication.IdJobApplication,
-		IdUser:                userId,
-		IdResume:              resume.IdResume,
-		ApplicationExternalId: jobApplication.IdExternal.String(),
+		ApplyAutonomously:     true,
+		BrowserPoolWorkflowId: &e.browserPoolWorkflowId,
 	}
-	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", workflowInput)
+	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "InitiateApplicationWorkflow", workflowInput)
 	if err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to start job application workflow", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start job application process"})
@@ -151,39 +169,67 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 		return
 	}
 
-	workflowId := fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String())
-
-	if err := e.db.Model(&jobApplication).Updates(map[string]any{
-		"status":              model.JobApplicationStatusProcessing,
-		"workflow_id":         &workflowId,
-		"created_at":          time.Now(),
-		"failure_reason":      nil,
-		"halt_reason":         nil,
-		"cancellation_reason": nil,
-	}).Error; err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to update job application on retry", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
+	if jobApplication.Status != model.JobApplicationStatusFailed &&
+		jobApplication.Status != model.JobApplicationStatusCancelled &&
+		jobApplication.Status != model.JobApplicationStatusHalted {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only failed, cancelled, or halted applications can be retried"})
 		return
 	}
 
-	workflowOptions := client.StartWorkflowOptions{
-		ID:                       workflowId,
-		TaskQueue:                string(e.taskQueueName),
-		WorkflowExecutionTimeout: JOB_APPLICATION_TIMEOUT,
-		WorkflowTaskTimeout:      1 * time.Minute,
+	workflowId := fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String())
+
+	tx := e.db.Begin()
+
+	result := tx.Model(&jobApplication).
+		Where("status IN ?", []model.JobApplicationStatus{
+			model.JobApplicationStatusFailed,
+			model.JobApplicationStatusCancelled,
+			model.JobApplicationStatusHalted,
+		}).
+		Updates(map[string]any{
+			"status":              model.JobApplicationStatusQueued,
+			"workflow_id":         &workflowId,
+			"created_at":          time.Now(),
+			"failure_reason":      nil,
+			"halt_reason":         nil,
+			"cancellation_reason": nil,
+		})
+	if result.Error != nil {
+		// no need to rollback here as nothing was updated
+		e.logger.ErrorContext(c.Request.Context(), "failed to update job application on retry", "error", result.Error)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
+		return
+	}
+	if result.RowsAffected == 0 {
+		// no need to rollback here nothing was updated
+		c.JSON(http.StatusConflict, gin.H{"error": "Application state changed; please try again"})
+		return
 	}
 
-	workflowInput := JobApplicationWorkflowInput{
-		Url:                   jobApplication.Url,
-		IdJobApplication:      jobApplication.IdJobApplication,
-		IdUser:                userId,
-		IdResume:              jobApplication.ResumeId,
-		ApplicationExternalId: jobApplication.IdExternal.String(),
-	}
-	_, err = e.temporalClient.ExecuteWorkflow(context.Background(), workflowOptions, "JobApplicationWorkflow", workflowInput)
+	err = e.temporalClient.SignalWorkflow(
+		context.Background(),
+		e.browserPoolWorkflowId,
+		"",
+		"queue_application",
+		ApplicationQueueItem{
+			IdJobApplication:      jobApplication.IdJobApplication,
+			Url:                   jobApplication.Url,
+			IdUser:                userId,
+			IdResume:              jobApplication.ResumeId,
+			ApplicationWorkflowId: workflowId,
+			NewReplayGeneration:   true,
+		},
+	)
 	if err != nil {
-		e.logger.ErrorContext(c.Request.Context(), "failed to start job application workflow on retry", "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start job application process"})
+		tx.Rollback()
+		e.logger.ErrorContext(c.Request.Context(), "failed to queue job application retry", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to queue job application process"})
+		return
+	}
+
+	if err := tx.Commit().Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to commit transaction", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to commit transaction"})
 		return
 	}
 
@@ -201,19 +247,20 @@ type FetchAllJobApplicationsRequest struct {
 }
 
 type JobApplication struct {
-	Id                 string                     `json:"id"`
-	Url                string                     `json:"url"`
-	JobTitle           string                     `json:"jobTitle"`
-	CompanyName        string                     `json:"companyName"`
-	Status             model.JobApplicationStatus `json:"status"`
-	ResponseStatus     model.ResponseStatus       `json:"responseStatus"`
-	HasApplicationData bool                       `json:"hasApplicationData"`
-	AppliedAt          *time.Time                 `json:"appliedAt,omitempty"`
-	FailureReason      *string                    `json:"failureReason,omitempty"`
-	CancellationReason *string                    `json:"cancellationReason,omitempty"`
-	HaltReason         *string                    `json:"haltReason,omitempty"`
-	CreatedAt          time.Time                  `json:"createdAt"`
-	UpdatedAt          time.Time                  `json:"updatedAt"`
+	Id                    string                     `json:"id"`
+	Url                   string                     `json:"url"`
+	JobTitle              string                     `json:"jobTitle"`
+	CompanyName           string                     `json:"companyName"`
+	Status                model.JobApplicationStatus `json:"status"`
+	ResponseStatus        model.ResponseStatus       `json:"responseStatus"`
+	HasApplicationData    bool                       `json:"hasApplicationData"`
+	AppliedUsingExtension bool                       `json:"appliedUsingExtension"`
+	AppliedAt             *time.Time                 `json:"appliedAt,omitempty"`
+	FailureReason         *string                    `json:"failureReason,omitempty"`
+	CancellationReason    *string                    `json:"cancellationReason,omitempty"`
+	HaltReason            *string                    `json:"haltReason,omitempty"`
+	CreatedAt             time.Time                  `json:"createdAt"`
+	UpdatedAt             time.Time                  `json:"updatedAt"`
 }
 
 type FetchAllJobApplicationsResponse struct {
@@ -274,19 +321,20 @@ func (e *Endpoint) FetchAllJobApplications(c *gin.Context) {
 	applications := make([]JobApplication, 0, len(jobApplications))
 	for _, jobApplication := range jobApplications {
 		applications = append(applications, JobApplication{
-			Id:                 jobApplication.IdExternal.String(),
-			Url:                jobApplication.Url,
-			JobTitle:           jobApplication.JobTitle,
-			CompanyName:        jobApplication.CompanyName,
-			Status:             jobApplication.Status,
-			ResponseStatus:     jobApplication.ResponseStatus,
-			HasApplicationData: jobApplication.JobApplicationData != nil,
-			FailureReason:      jobApplication.FailureReason,
-			CancellationReason: jobApplication.CancellationReason,
-			HaltReason:         jobApplication.HaltReason,
-			AppliedAt:          jobApplication.AppliedAt,
-			CreatedAt:          jobApplication.CreatedAt,
-			UpdatedAt:          jobApplication.UpdatedAt,
+			Id:                    jobApplication.IdExternal.String(),
+			Url:                   jobApplication.Url,
+			JobTitle:              jobApplication.JobTitle,
+			CompanyName:           jobApplication.CompanyName,
+			Status:                jobApplication.Status,
+			ResponseStatus:        jobApplication.ResponseStatus,
+			HasApplicationData:    jobApplication.JobApplicationData != nil,
+			AppliedUsingExtension: jobApplication.AppliedUsingExtension,
+			FailureReason:         jobApplication.FailureReason,
+			CancellationReason:    jobApplication.CancellationReason,
+			HaltReason:            jobApplication.HaltReason,
+			AppliedAt:             jobApplication.AppliedAt,
+			CreatedAt:             jobApplication.CreatedAt,
+			UpdatedAt:             jobApplication.UpdatedAt,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": FetchAllJobApplicationsResponse{
@@ -304,6 +352,7 @@ type UserActionResponse struct {
 	Layout         model.UserActionLayout `json:"layout"`
 	WorkflowID     string                 `json:"workflow_id"`
 	SignalName     string                 `json:"signal_name"`
+	DurablePause   bool                   `json:"durable_pause"`
 }
 
 type CancelApplicationRequest struct {
@@ -311,7 +360,8 @@ type CancelApplicationRequest struct {
 }
 
 type CancelSignalPayload struct {
-	Reason string `json:"reason"`
+	IdJobApplication uint   `json:"id_job_application"`
+	Reason           string `json:"reason"`
 }
 
 func (e *Endpoint) CancelApplication(c *gin.Context) {
@@ -339,24 +389,19 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 		return
 	}
 
-	if jobApplication.Status != model.JobApplicationStatusProcessing {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Application is not currently processing"})
+	if !isCancellableApplicationStatus(jobApplication.Status) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Application cannot be cancelled in its current state"})
 		return
 	}
 
-	if jobApplication.WorkflowID == nil {
-		if err := e.cancelApplication(&jobApplication, req.Reason); err != nil {
-			e.logger.ErrorContext(c.Request.Context(), "failed to cancel application", "error", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel application"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"error": "Application cancelled"})
-		return
-	}
-
-	if err := e.cancelApplication(&jobApplication, req.Reason); err != nil {
+	cancelled, err := e.cancelApplication(&jobApplication, req.Reason)
+	if err != nil {
 		e.logger.ErrorContext(c.Request.Context(), "failed to cancel application", "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel application"})
+		return
+	}
+	if !cancelled {
+		c.JSON(http.StatusConflict, gin.H{"error": "Application state changed; please try again"})
 		return
 	}
 
@@ -364,34 +409,68 @@ func (e *Endpoint) CancelApplication(c *gin.Context) {
 	if req.Reason != nil {
 		reason = *req.Reason
 	}
-	workflowID := *jobApplication.WorkflowID
-	go func() {
-		err := e.temporalClient.SignalWorkflow(
-			context.Background(),
-			workflowID,
-			"",
-			"CANCEL_APPLICATION",
-			CancelSignalPayload{Reason: reason},
-		)
-		if err != nil {
-			e.logger.Error("failed to signal workflow for cancellation", "error", err, "workflowID", workflowID)
-		}
-	}()
+
+	if jobApplication.WorkflowID != nil && *jobApplication.WorkflowID != "" {
+		go func() {
+			for attempt := 0; attempt < 5; attempt++ {
+				if attempt > 0 {
+					time.Sleep(time.Duration(attempt*10) * time.Second)
+				}
+
+				err := e.temporalClient.SignalWorkflow(
+					context.Background(),
+					e.browserPoolWorkflowId,
+					"",
+					"cancel_application",
+					CancelSignalPayload{
+						IdJobApplication: jobApplication.IdJobApplication,
+						Reason:           reason,
+					},
+				)
+				if err == nil {
+					return
+				}
+
+				e.logger.Error("failed to signal browser pool for cancellation",
+					"error", err,
+					"idJobApplication", jobApplication.IdJobApplication,
+				)
+			}
+		}()
+	}
 
 	c.JSON(http.StatusAccepted, gin.H{"message": "Application cancellation initiated"})
 }
 
-func (e *Endpoint) cancelApplication(jobApplication *model.JobApplication, reason *string) error {
-	if err := e.db.Model(jobApplication).
-		Where("status = ?", model.JobApplicationStatusProcessing).
+func isCancellableApplicationStatus(status model.JobApplicationStatus) bool {
+	switch status {
+	case model.JobApplicationStatusProcessing,
+		model.JobApplicationStatusStarted,
+		model.JobApplicationStatusPending,
+		model.JobApplicationStatusQueued:
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *Endpoint) cancelApplication(jobApplication *model.JobApplication, reason *string) (bool, error) {
+	result := e.db.Model(jobApplication).
+		Where("status IN ?", []model.JobApplicationStatus{
+			model.JobApplicationStatusProcessing,
+			model.JobApplicationStatusStarted,
+			model.JobApplicationStatusPending,
+			model.JobApplicationStatusQueued,
+		}).
 		Updates(map[string]any{
 			"status":              model.JobApplicationStatusCancelled,
 			"cancellation_reason": reason,
-		}).Error; err != nil {
-		return err
+		})
+	if result.Error != nil {
+		return false, result.Error
 	}
 
-	return nil
+	return result.RowsAffected > 0, nil
 }
 
 func (e *Endpoint) DeleteApplication(c *gin.Context) {
@@ -526,7 +605,8 @@ func (e *Endpoint) GetUserAction(c *gin.Context) {
 	}
 
 	var userAction model.UserAction
-	if err := e.db.Where("id_job_application = ? AND is_pending = ?", jobApp.IdJobApplication, true).
+	if err := e.db.Where("id_job_application = ? AND (is_pending = ? OR (durable_pause = ? AND submitted_at IS NOT NULL AND resume_enqueued_at IS NULL))",
+		jobApp.IdJobApplication, true, true).
 		Order("created_at ASC").
 		First(&userAction).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "No pending user action found"})
@@ -540,7 +620,192 @@ func (e *Endpoint) GetUserAction(c *gin.Context) {
 		Layout:         userAction.UserActionLayout,
 		WorkflowID:     userAction.WorkflowID,
 		SignalName:     "USER_ACTION_RESULT",
+		DurablePause:   userAction.DurablePause,
 	})
+}
+
+type SubmitUserActionRequest struct {
+	UserActionID uint                         `json:"user_action_id" binding:"required"`
+	Values       []model.UserActionResultItem `json:"values" binding:"required"`
+}
+
+type invalidUserActionSubmission string
+
+func (e invalidUserActionSubmission) Error() string { return string(e) }
+
+func isInvalidUserActionSubmission(err error) bool {
+	var invalid invalidUserActionSubmission
+	return errors.As(err, &invalid)
+}
+
+func (e *Endpoint) SubmitUserAction(c *gin.Context) {
+	userID := c.GetUint("userId")
+	if userID == 0 {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	externalID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid job application ID"})
+		return
+	}
+	var request SubmitUserActionRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var application model.JobApplication
+	if err := e.db.Where("id_external = ? AND id_user = ? AND deleted_at IS NULL", externalID, userID).First(&application).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+		return
+	}
+	var action model.UserAction
+	if err := e.db.Where("id_user_action = ? AND id_job_application = ? AND id_user = ?", request.UserActionID, application.IdJobApplication, userID).First(&action).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User action not found"})
+		return
+	}
+	if !action.DurablePause {
+		if err := validateUserActionValues(action.UserActionLayout, request.Values); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := e.temporalClient.SignalWorkflow(c.Request.Context(), action.WorkflowID, "", "USER_ACTION_RESULT", request.Values); err != nil {
+			e.logger.ErrorContext(c.Request.Context(), "failed to deliver legacy user action signal", "error", err)
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Failed to submit user action"})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"message": "Action submitted"})
+		return
+	}
+
+	err = e.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id_user_action = ? AND id_job_application = ? AND id_user = ?", request.UserActionID, application.IdJobApplication, userID).
+			First(&action).Error; err != nil {
+			return err
+		}
+		if action.SubmittedAt == nil {
+			if !action.IsPending {
+				return gorm.ErrRecordNotFound
+			}
+			if err := validateUserActionValues(action.UserActionLayout, request.Values); err != nil {
+				return err
+			}
+			plain, err := json.Marshal(request.Values)
+			if err != nil {
+				return fmt.Errorf("encode user action values: %w", err)
+			}
+			ciphertext, err := utils.EncryptUserActionResult(string(plain), action.IdExternal)
+			if err != nil {
+				return err
+			}
+			resumeWorkflowID := "job-application-resume-" + uuid.NewString()
+			now := time.Now().UTC()
+			if err := tx.Model(&action).Updates(map[string]any{
+				"result_ciphertext":  ciphertext,
+				"submitted_at":       now,
+				"is_pending":         false,
+				"resume_workflow_id": resumeWorkflowID,
+			}).Error; err != nil {
+				return err
+			}
+			action.ResultCiphertext = ciphertext
+			action.SubmittedAt = &now
+			action.IsPending = false
+			action.ResumeWorkflowID = resumeWorkflowID
+
+			updated := tx.Model(&model.JobApplication{}).
+				Where("id_job_application = ? AND status = ?", application.IdJobApplication, model.JobApplicationStatusBlocked).
+				Update("status", model.JobApplicationStatusProcessing)
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected == 0 {
+				return fmt.Errorf("application is no longer blocked")
+			}
+		}
+		if len(action.ResultCiphertext) == 0 || action.ResumeWorkflowID == "" {
+			return fmt.Errorf("submitted user action is missing resume data")
+		}
+		return nil
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			c.JSON(http.StatusConflict, gin.H{"error": "User action is no longer pending"})
+		case isInvalidUserActionSubmission(err):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			e.logger.ErrorContext(c.Request.Context(), "failed to persist user action submission", "error", err)
+			if err.Error() == "application is no longer blocked" {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to submit user action"})
+		}
+		return
+	}
+
+	queueItem := buildUserActionResumeQueueItem(application, action, userID)
+	if err := e.temporalClient.SignalWorkflow(c.Request.Context(), e.browserPoolWorkflowId, "", "queue_application", queueItem); err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to requeue application after user action", "error", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Answers saved; application requeue will retry"})
+		return
+	}
+	now := time.Now().UTC()
+	if err := e.db.Model(&model.UserAction{}).
+		Where("id_user_action = ? AND id_user = ? AND submitted_at IS NOT NULL AND resume_enqueued_at IS NULL", action.IdUserAction, userID).
+		Update("resume_enqueued_at", now).Error; err != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to mark user-action resume as queued", "error", err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Answers saved; application resume will retry"})
+		return
+	}
+	c.JSON(http.StatusAccepted, gin.H{"message": "Application resumed"})
+}
+
+func buildUserActionResumeQueueItem(application model.JobApplication, action model.UserAction, userID uint) ApplicationQueueItem {
+	return ApplicationQueueItem{
+		IdJobApplication:      application.IdJobApplication,
+		Url:                   application.Url,
+		IdUser:                userID,
+		IdResume:              application.ResumeId,
+		ApplicationWorkflowId: action.ResumeWorkflowID,
+		ResumeUserActionID:    action.IdUserAction,
+	}
+}
+
+func validateUserActionValues(layout model.UserActionLayout, values []model.UserActionResultItem) error {
+	if len(layout) == 0 || len(values) != len(layout) {
+		return invalidUserActionSubmission("submitted answers do not match the requested fields")
+	}
+	expected := make(map[string]struct{}, len(layout))
+	for _, item := range layout {
+		if item.FieldName == "" {
+			return invalidUserActionSubmission("user action contains an unnamed field")
+		}
+		if _, exists := expected[item.FieldName]; exists {
+			return invalidUserActionSubmission("user action contains duplicate fields")
+		}
+		expected[item.FieldName] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if _, ok := expected[value.FieldName]; !ok {
+			return invalidUserActionSubmission("submitted answer contains an unknown field")
+		}
+		if _, exists := seen[value.FieldName]; exists {
+			return invalidUserActionSubmission("submitted answer contains duplicate fields")
+		}
+		seen[value.FieldName] = struct{}{}
+		if len(value.Value) > 10000 {
+			return invalidUserActionSubmission("submitted answer exceeds the allowed size")
+		}
+	}
+	if len(seen) != len(expected) {
+		return invalidUserActionSubmission("submitted answers do not match the requested fields")
+	}
+	return nil
 }
 
 type ResumeSummary struct {
@@ -550,17 +815,18 @@ type ResumeSummary struct {
 }
 
 type JobApplicationComprehensiveResponse struct {
-	Id                string                          `json:"id"`
-	AppliedAt         *time.Time                      `json:"appliedAt,omitempty"`
-	Url               string                          `json:"url"`
-	JobTitle          string                          `json:"jobTitle"`
-	CompanyName       string                          `json:"companyName"`
-	Status            string                          `json:"status"`
-	Questions         []model.JobApplicationQuestions `json:"questions"`
-	JobDescription    string                          `json:"jobDescription"`
-	CoverLetter       *string                         `json:"coverLetter"`
-	CoverLetterStatus model.CoverLetterStatus         `json:"coverLetterStatus,omitempty"`
-	Resume            ResumeSummary                   `json:"resume"`
+	Id                    string                          `json:"id"`
+	AppliedAt             *time.Time                      `json:"appliedAt,omitempty"`
+	AppliedUsingExtension bool                            `json:"appliedUsingExtension"`
+	Url                   string                          `json:"url"`
+	JobTitle              string                          `json:"jobTitle"`
+	CompanyName           string                          `json:"companyName"`
+	Status                string                          `json:"status"`
+	Questions             []model.JobApplicationQuestions `json:"questions"`
+	JobDescription        string                          `json:"jobDescription"`
+	CoverLetter           *string                         `json:"coverLetter"`
+	CoverLetterStatus     model.CoverLetterStatus         `json:"coverLetterStatus,omitempty"`
+	Resume                ResumeSummary                   `json:"resume"`
 }
 
 // get /jobs/:id/comprehensive
@@ -598,16 +864,17 @@ func (e *Endpoint) FetchJobApplicationComprehensive(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": JobApplicationComprehensiveResponse{
-		Id:                jobApplication.IdExternal.String(),
-		Url:               jobApplication.Url,
-		JobTitle:          jobApplication.JobTitle,
-		CompanyName:       jobApplication.CompanyName,
-		Status:            string(jobApplication.Status),
-		Questions:         questions,
-		JobDescription:    jobApplication.JobDescription,
-		CoverLetter:       coverLetter,
-		CoverLetterStatus: coverLetterStatus,
-		AppliedAt:         jobApplication.AppliedAt,
+		Id:                    jobApplication.IdExternal.String(),
+		AppliedUsingExtension: jobApplication.AppliedUsingExtension,
+		Url:                   jobApplication.Url,
+		JobTitle:              jobApplication.JobTitle,
+		CompanyName:           jobApplication.CompanyName,
+		Status:                string(jobApplication.Status),
+		Questions:             questions,
+		JobDescription:        jobApplication.JobDescription,
+		CoverLetter:           coverLetter,
+		CoverLetterStatus:     coverLetterStatus,
+		AppliedAt:             jobApplication.AppliedAt,
 		Resume: ResumeSummary{
 			Id:          jobApplication.Resume.IdExternal.String(),
 			DisplayName: jobApplication.Resume.DisplayName,
