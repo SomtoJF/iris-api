@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/SomtoJF/iris-api/model"
@@ -215,16 +216,19 @@ type FetchCoverLettersRequest struct {
 	Search string `form:"search"`
 }
 
-// CoverLetterListItem is GetCoverLetterResponse without the cover letter body.
+const coverLetterPreviewLimit = 240
+
+// CoverLetterListItem contains metadata and a bounded preview for list views.
 type CoverLetterListItem struct {
-	Id             string                  `json:"id"`
-	CompanyName    string                  `json:"companyName"`
-	JobTitle       string                  `json:"jobTitle"`
-	JobDescription string                  `json:"jobDescription"`
-	Url            string                  `json:"url"`
-	ResumeId       string                  `json:"resumeId"`
-	Status         model.CoverLetterStatus `json:"status"`
-	CreatedAt      time.Time               `json:"createdAt"`
+	Id                 string                  `json:"id"`
+	CompanyName        string                  `json:"companyName"`
+	JobTitle           string                  `json:"jobTitle"`
+	JobDescription     string                  `json:"jobDescription"`
+	CoverLetterPreview string                  `json:"coverLetterPreview"`
+	Url                string                  `json:"url"`
+	ResumeId           string                  `json:"resumeId"`
+	Status             model.CoverLetterStatus `json:"status"`
+	CreatedAt          time.Time               `json:"createdAt"`
 }
 
 type FetchCoverLettersResponse struct {
@@ -359,14 +363,28 @@ func buildCoverLetterResponse(coverLetter *model.CoverLetter) GetCoverLetterResp
 
 func buildCoverLetterListItem(coverLetter *model.CoverLetter) CoverLetterListItem {
 	item := CoverLetterListItem{
-		Id:             coverLetter.IdExternal.String(),
-		CompanyName:    coverLetter.CompanyName,
-		JobTitle:       coverLetter.JobTitle,
-		JobDescription: coverLetter.JobDescription,
-		Url:            coverLetter.Url,
-		Status:         coverLetter.Status,
-		CreatedAt:      coverLetter.CreatedAt,
+		Id:                 coverLetter.IdExternal.String(),
+		CompanyName:        coverLetter.CompanyName,
+		JobTitle:           coverLetter.JobTitle,
+		JobDescription:     coverLetter.JobDescription,
+		CoverLetterPreview: buildCoverLetterPreview(coverLetter.Body),
+		Url:                coverLetter.Url,
+		Status:             coverLetter.Status,
+		CreatedAt:          coverLetter.CreatedAt,
 	}
 	item.ResumeId = coverLetter.Resume.IdExternal.String()
 	return item
+}
+
+func buildCoverLetterPreview(body *string) string {
+	if body == nil {
+		return ""
+	}
+
+	preview := strings.Join(strings.Fields(*body), " ")
+	runes := []rune(preview)
+	if len(runes) <= coverLetterPreviewLimit {
+		return preview
+	}
+	return string(runes[:coverLetterPreviewLimit]) + "…"
 }
