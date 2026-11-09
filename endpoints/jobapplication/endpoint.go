@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -163,6 +164,10 @@ func (e *Endpoint) softDeleteApplication(jobApplication *model.JobApplication) {
 }
 
 // post /job/:id/retry-application
+type RetryApplicationRequest struct {
+	ResumeId *string `json:"resumeId"`
+}
+
 func (e *Endpoint) RetryApplication(c *gin.Context) {
 	userId := c.GetUint("userId")
 	if userId == 0 {
@@ -178,30 +183,55 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 	}
 
 	var jobApplication model.JobApplication
-	if err := e.db.Where("id_external = ? AND id_user = ?", id, userId).First(&jobApplication).Error; err != nil {
+	if err := e.db.Where("id_external = ? AND id_user = ? AND deleted_at IS NULL", id, userId).First(&jobApplication).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Job application not found"})
+		return
+	}
+
+	var request RetryApplicationRequest
+	if err := c.ShouldBindJSON(&request); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
 	if jobApplication.Status != model.JobApplicationStatusFailed &&
 		jobApplication.Status != model.JobApplicationStatusCancelled &&
-		jobApplication.Status != model.JobApplicationStatusHalted {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only failed, cancelled, or halted applications can be retried"})
+		jobApplication.Status != model.JobApplicationStatusHalted &&
+		jobApplication.Status != model.JobApplicationStatusStarted {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only started, failed, cancelled, or halted applications can be retried"})
+		return
+	}
+
+	resume, err := e.resolveResume(userId, request.ResumeId)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No resume found"})
+			return
+		}
+		e.logger.ErrorContext(c.Request.Context(), "failed to resolve resume for retry", "error", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve resume"})
 		return
 	}
 
 	workflowId := fmt.Sprintf("job-application-%s-%s", jobApplication.Url, uuid.New().String())
 
 	tx := e.db.Begin()
+	if tx.Error != nil {
+		e.logger.ErrorContext(c.Request.Context(), "failed to begin retry transaction", "error", tx.Error)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
+		return
+	}
 
 	result := tx.Model(&jobApplication).
 		Where("status IN ?", []model.JobApplicationStatus{
 			model.JobApplicationStatusFailed,
 			model.JobApplicationStatusCancelled,
 			model.JobApplicationStatusHalted,
+			model.JobApplicationStatusStarted,
 		}).
 		Updates(map[string]any{
 			"status":              model.JobApplicationStatusQueued,
+			"id_resume":           resume.IdResume,
 			"workflow_id":         &workflowId,
 			"created_at":          time.Now(),
 			"failure_reason":      nil,
@@ -211,11 +241,12 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 	if result.Error != nil {
 		// no need to rollback here as nothing was updated
 		e.logger.ErrorContext(c.Request.Context(), "failed to update job application on retry", "error", result.Error)
+		tx.Rollback()
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update job application"})
 		return
 	}
 	if result.RowsAffected == 0 {
-		// no need to rollback here nothing was updated
+		tx.Rollback()
 		c.JSON(http.StatusConflict, gin.H{"error": "Application state changed; please try again"})
 		return
 	}
@@ -229,7 +260,7 @@ func (e *Endpoint) RetryApplication(c *gin.Context) {
 			IdJobApplication:      jobApplication.IdJobApplication,
 			Url:                   jobApplication.Url,
 			IdUser:                userId,
-			IdResume:              jobApplication.ResumeId,
+			IdResume:              resume.IdResume,
 			ApplicationWorkflowId: workflowId,
 			NewReplayGeneration:   true,
 		},
@@ -254,8 +285,8 @@ type FetchAllJobApplicationsRequest struct {
 	Page              int    `form:"page" binding:"required"`
 	Limit             int    `form:"limit" binding:"required"`
 	Search            string `form:"search"`
-	Status            string `form:"status" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
-	StatusNot         string `form:"status_not" binding:"omitempty,oneof=processing applied failed blocked cancelled halted"`
+	Status            string `form:"status" binding:"omitempty,oneof=started queued processing applied failed blocked cancelled halted"`
+	StatusNot         string `form:"status_not" binding:"omitempty,oneof=started queued processing applied failed blocked cancelled halted"`
 	ResponseStatus    string `form:"response_status" binding:"omitempty,oneof=none rejected interviewing ghosted"`
 	ResponseStatusNot string `form:"response_status_not" binding:"omitempty,oneof=none rejected interviewing ghosted"`
 }
